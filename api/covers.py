@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from database.db import get_db
-from database.models import Track
+from database.models import Track, User
 from core.security import get_current_user, get_current_admin_user, get_current_user_optional, is_safe_track_file_path
 from plugin_system.manager import plugin_manager
 
