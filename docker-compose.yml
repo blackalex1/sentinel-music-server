@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: music-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-music_db}
+      POSTGRES_USER: ${POSTGRES_USER:-music_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      # Постоянное хранилище базы данных PostgreSQL
+      - "${PGDATA_DIR:-./pgdata}:/var/lib/postgresql/data"
+    networks:
+      - music-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-music_admin} -d ${POSTGRES_DB:-music_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  music-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: music-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - SERVER_LAN_IP=${SERVER_LAN_IP:-}
+      - MUSIC_DIR=/music
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-music_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-music_db}
+      - WATCHDOG_ENABLED=${WATCHDOG_ENABLED:-true}
+      - WATCHDOG_DEBOUNCE_SECONDS=${WATCHDOG_DEBOUNCE_SECONDS:-2.0}
+      - EXT_P2P_API_URL=${EXT_P2P_API_URL:-http://host.docker.internal:5030/api/v0}
+      - EXT_P2P_API_KEY=${EXT_P2P_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Папка с музыкальной фонотекой (переопределяется в .env)
+      - "${MUSIC_DIR:-./music}:/music:rw"
+      # Папка для локального кэша и файлов приложения
+      - "${DATA_DIR:-./data}:/app/data:rw"
+    networks:
+      - music-net
+
+networks:
+  music-net:
+    driver: bridge

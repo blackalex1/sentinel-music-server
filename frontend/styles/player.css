@@ -1,0 +1,289 @@
+/* Sentinel Design System — Нижняя панель плеера */
+.bottom-player-bar {
+  height: 84px;
+  background-color: var(--bg-player);
+  backdrop-filter: var(--blur-modal);
+  -webkit-backdrop-filter: var(--blur-modal);
+  border-top: 1px solid var(--border-color);
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.65);
+  display: grid;
+  grid-template-columns: minmax(200px, 290px) 1fr minmax(200px, auto);
+  align-items: center;
+  padding: 0 28px;
+  position: relative;
+  z-index: 20;
+}
+
+/* Левая часть: обложка, название, лайк/дизлайк */
+.player-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.player-cover {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  object-fit: cover;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  transition: transform var(--transition-fast);
+}
+
+.player-cover:hover {
+  transform: scale(1.04);
+  border-color: var(--border-highlight);
+}
+
+.player-track-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.player-title {
+  font-size: 0.94rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: var(--tracking-tight);
+}
+
+.player-artist {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+  letter-spacing: var(--tracking-tight);
+}
+
+.player-reactions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 6px;
+}
+
+.btn-like, .btn-dislike, .btn-replace {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1.15rem;
+  transition: all var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-like:hover {
+  transform: scale(1.2);
+  filter: drop-shadow(0 0 8px rgba(244, 63, 94, 0.4));
+}
+
+.btn-like.liked {
+  color: var(--accent-rose);
+  filter: drop-shadow(0 0 10px var(--accent-rose-glow));
+}
+
+.btn-dislike:hover {
+  color: #ffffff;
+  transform: scale(1.2);
+}
+
+.btn-dislike.disliked {
+  color: var(--text-dim);
+  opacity: 0.5;
+}
+
+.btn-replace:hover {
+  color: var(--accent-cyan);
+  transform: scale(1.2) rotate(60deg);
+  filter: drop-shadow(0 0 8px var(--accent-cyan-glow));
+}
+
+/* Центральная часть: кнопки управления и таймлайн */
+.player-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 620px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.player-controls {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.ctrl-btn-secondary {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1.15rem;
+  transition: all var(--transition-fast);
+}
+
+.ctrl-btn-secondary:hover {
+  color: var(--text-primary);
+  transform: scale(1.1);
+}
+
+.ctrl-btn-secondary.active {
+  color: var(--accent-cyan);
+  filter: drop-shadow(0 0 10px var(--accent-cyan-glow));
+}
+
+.ctrl-btn-play {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--primary-gradient);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  cursor: pointer;
+  box-shadow: 0 4px 20px var(--primary-glow);
+  transition: all var(--transition-fast);
+}
+
+.ctrl-btn-play:hover {
+  background: var(--primary-gradient-hover);
+  transform: translateY(-1px) scale(1.08);
+  box-shadow: 0 8px 28px rgba(139, 92, 246, 0.5), 0 0 20px rgba(6, 182, 212, 0.25);
+}
+
+/* Прогресс-бар со шкалой времени */
+.timeline-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.time-label {
+  font-size: 0.74rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: center;
+}
+
+.timeline-bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  position: relative;
+  transition: height var(--transition-fast);
+}
+
+.timeline-bar:hover {
+  height: 6px;
+}
+
+.timeline-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary) 0%, var(--accent-cyan) 100%);
+  border-radius: var(--radius-pill);
+  width: 0%;
+  position: relative;
+  transition: width 0.1s linear;
+}
+
+.timeline-thumb {
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%) scale(0);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 0 10px var(--primary-glow);
+  transition: transform var(--transition-fast);
+}
+
+.timeline-bar:hover .timeline-thumb {
+  transform: translateY(-50%) scale(1);
+}
+
+/* Правая часть: Караоке, очередь, настройки звука, громкость */
+.player-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  min-width: 0;
+}
+
+.btn-feature {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+.btn-feature:hover {
+  color: var(--text-primary);
+  transform: scale(1.1);
+}
+
+.btn-feature.active {
+  color: var(--accent-cyan);
+  filter: drop-shadow(0 0 8px var(--accent-cyan-glow));
+}
+
+.volume-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 115px;
+  flex-shrink: 0;
+}
+
+.volume-slider {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  position: relative;
+  transition: height var(--transition-fast);
+}
+
+.volume-slider:hover {
+  height: 6px;
+}
+
+.volume-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary) 0%, var(--accent-cyan) 100%);
+  border-radius: var(--radius-pill);
+  width: 80%;
+}

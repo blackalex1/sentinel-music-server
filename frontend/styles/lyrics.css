@@ -1,0 +1,236 @@
+/* Sentinel Design System — Модуль всплывающего окна текстов песен и караоке (Lyrics Overlay) */
+
+.lyrics-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 84px; /* Оставляет нижний плеер доступным и видимым */
+  z-index: 500;
+  background: #090d18;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(24px) scale(0.99);
+  transition: opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.30s cubic-bezier(0.16, 1, 0.3, 1),
+              visibility 0.28s;
+  user-select: none;
+}
+
+.lyrics-overlay.active {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+}
+
+/* Динамический амбиентный фон обложки альбома */
+.lyrics-backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.lyrics-backdrop-img {
+  position: absolute;
+  inset: -60px;
+  width: calc(100% + 120px);
+  height: calc(100% + 120px);
+  object-fit: cover;
+  filter: blur(48px) brightness(0.65) saturate(1.75);
+  transform: scale(1.12);
+  opacity: 0.65;
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+.lyrics-backdrop-gradient {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 30%, rgba(10, 14, 26, 0.20) 0%, rgba(8, 12, 22, 0.75) 100%),
+              linear-gradient(180deg, rgba(8, 12, 22, 0.40) 0%, rgba(8, 12, 22, 0.12) 35%, rgba(8, 12, 22, 0.82) 100%);
+}
+
+/* Шапка всплывающего окна текстов */
+.lyrics-overlay-header {
+  position: relative;
+  z-index: 10;
+  height: 72px;
+  padding: 0 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  flex-shrink: 0;
+}
+
+.lyrics-header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.lyrics-header-cover {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm, 8px);
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  flex-shrink: 0;
+}
+
+.lyrics-header-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.lyrics-badge-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-cyan, #38bdf8);
+}
+
+.lyrics-badge-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-cyan, #38bdf8);
+  box-shadow: 0 0 8px var(--accent-cyan, #38bdf8);
+}
+
+.lyrics-header-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #fff;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: var(--tracking-tight);
+}
+
+.lyrics-header-artist {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lyrics-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lyrics-btn-close {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.lyrics-btn-close:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  transform: scale(1.06);
+}
+
+/* Контейнер со списком строк караоке */
+.lyrics-content-scroll {
+  position: relative;
+  z-index: 5;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 50px 24px 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 860px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+  text-align: center;
+  scroll-behavior: smooth;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+
+.lyrics-content-scroll::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+.lyrics-empty-state {
+  margin: auto 0;
+  color: var(--text-muted);
+  font-size: 1.15rem;
+  font-weight: 500;
+  letter-spacing: var(--tracking-tight);
+}
+
+/* Строки текста */
+.lyric-line-item {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.38);
+  cursor: pointer;
+  padding: 8px 24px;
+  border-radius: var(--radius-md, 10px);
+  line-height: 1.45;
+  letter-spacing: var(--tracking-tight);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+  transform: scale(0.96);
+  transform-origin: center center;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+              color 0.28s ease,
+              text-shadow 0.28s ease,
+              opacity 0.28s ease;
+  will-change: transform, color, opacity;
+}
+
+.lyric-line-item:hover {
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.05);
+  transform: scale(0.99);
+}
+
+.lyric-line-item.active {
+  color: #ffffff;
+  font-weight: 800;
+  transform: scale(1.05);
+  text-shadow: 0 0 26px rgba(255, 255, 255, 0.75),
+               0 0 45px rgba(56, 189, 248, 0.45);
+}
+
+.lyric-line-item.passed {
+  color: rgba(255, 255, 255, 0.22);
+  transform: scale(0.95);
+}
+
+@keyframes pulseDot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.6; }
+}

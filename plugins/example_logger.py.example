@@ -1,0 +1,23 @@
+"""
+Пример подключаемого плагина для сервера.
+Для активации переименуйте этот файл в logger.py (без .example).
+"""
+
+from plugin_system.base import BasePlugin
+
+
+class LoggingPlugin(BasePlugin):
+    name = "ConsoleNotifier"
+    version = "1.0.0"
+    description = "Выводит уведомления о событиях в консоль сервера"
+    enabled = True
+
+    async def on_startup(self, context: dict) -> None:
+        print("[Plugin: ConsoleNotifier] Сервер успешно запущен!")
+
+    async def on_track_import_request(self, artist: str, title: str) -> bool:
+        print(f"[Plugin: ConsoleNotifier] Запрошен импорт трека: {artist} — {title}")
+        return False  # Возвращаем True, если плагин действительно скачал/импортировал трек
+
+    async def on_user_reaction(self, track_id: int, is_like: bool, is_dislike: bool) -> None:
+        print(f"[Plugin: ConsoleNotifier] Реакция на трек {track_id}: Like={is_like}, Dislike={is_dislike}")

@@ -1,0 +1,230 @@
+/* Sentinel Design System — Модуль универсальных диалоговых уведомлений (Notification Dialogs) */
+
+.sentinel-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 22, 0.76);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.22s;
+  padding: 20px;
+}
+
+.sentinel-dialog-overlay.active {
+  opacity: 1;
+  visibility: visible;
+}
+
+.sentinel-dialog-card {
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius: var(--radius-xl, 18px);
+  padding: 26px 28px;
+  width: 100%;
+  max-width: 460px;
+  box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  transform: scale(0.93) translateY(12px);
+  transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  color: var(--text-primary, #f8fafc);
+  display: flex;
+  flex-direction: column;
+}
+
+.sentinel-dialog-overlay.active .sentinel-dialog-card {
+  transform: scale(1) translateY(0);
+}
+
+.sentinel-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.sentinel-dialog-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all var(--transition-fast, 0.15s ease);
+}
+
+.sentinel-dialog-icon.danger {
+  background: rgba(244, 63, 94, 0.15);
+  color: var(--accent-rose, #f43f5e);
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  box-shadow: 0 0 16px rgba(244, 63, 94, 0.2);
+}
+
+.sentinel-dialog-icon.warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.2);
+}
+
+.sentinel-dialog-icon.primary,
+.sentinel-dialog-icon.info {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--accent-cyan, #38bdf8);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.2);
+}
+
+.sentinel-dialog-icon.success {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.2);
+}
+
+.sentinel-dialog-title-block {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sentinel-dialog-title {
+  font-size: 1.18rem;
+  font-weight: 700;
+  color: #fff;
+  margin: 0;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
+.sentinel-dialog-subtitle {
+  font-size: 0.82rem;
+  color: var(--text-muted, #94a3b8);
+  margin: 0;
+}
+
+.sentinel-dialog-body {
+  font-size: 0.93rem;
+  color: var(--text-secondary, #cbd5e1);
+  line-height: 1.55;
+  margin-bottom: 20px;
+  word-break: break-word;
+}
+
+.sentinel-dialog-details {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md, 10px);
+  font-size: 0.82rem;
+  color: var(--text-muted, #94a3b8);
+  line-height: 1.45;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.sentinel-dialog-input-wrapper {
+  margin-top: 12px;
+}
+
+.sentinel-dialog-input {
+  width: 100%;
+  padding: 11px 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-md, 10px);
+  color: #fff;
+  font-size: 0.94rem;
+  outline: none;
+  transition: all 0.18s ease;
+}
+
+.sentinel-dialog-input:focus {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: var(--accent-cyan, #38bdf8);
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.3);
+}
+
+.sentinel-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.sentinel-dialog-btn {
+  padding: 9px 20px;
+  border-radius: var(--radius-md, 10px);
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  outline: none;
+  font-family: inherit;
+}
+
+.sentinel-dialog-btn:focus-visible {
+  outline: 2px solid var(--accent-cyan, #38bdf8);
+  outline-offset: 2px;
+}
+
+.sentinel-dialog-btn.btn-cancel {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-secondary, #cbd5e1);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.sentinel-dialog-btn.btn-cancel:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.sentinel-dialog-btn.btn-confirm-danger {
+  background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(244, 63, 94, 0.35);
+}
+
+.sentinel-dialog-btn.btn-confirm-danger:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(244, 63, 94, 0.45);
+}
+
+.sentinel-dialog-btn.btn-confirm-primary {
+  background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+  color: #0f172a;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(56, 189, 248, 0.35);
+}
+
+.sentinel-dialog-btn.btn-confirm-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(56, 189, 248, 0.45);
+}
+
+.sentinel-dialog-btn.btn-confirm-warning {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: #0f172a;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.35);
+}
+
+.sentinel-dialog-btn.btn-confirm-warning:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.45);
+}
