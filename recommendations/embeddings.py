@@ -33,13 +33,21 @@ def extract_audio_features(file_path: str, offset_seconds: float = 30.0, duratio
             "-"
         ]
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        raw_bytes, _ = proc.communicate(timeout=15)
+        try:
+            raw_bytes, _ = proc.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            raw_bytes, _ = proc.communicate()
 
         if not raw_bytes or len(raw_bytes) < 44100:
             # Если трек короче 30 секунд или смещение слишком велико, пробуем с 0 секунды
             cmd[2] = "0"
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            raw_bytes, _ = proc.communicate(timeout=15)
+            try:
+                raw_bytes, _ = proc.communicate(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                raw_bytes, _ = proc.communicate()
 
         y = np.frombuffer(raw_bytes, dtype=np.float32)
         if len(y) < 44100:
@@ -93,16 +101,18 @@ def extract_audio_features(file_path: str, offset_seconds: float = 30.0, duratio
         major_prof = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
         minor_prof = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
 
-        major_corr = max(
-            float(np.corrcoef(np.roll(chroma, -i), major_prof)[0, 1])
-            for i in range(12)
-        )
-        minor_corr = max(
-            float(np.corrcoef(np.roll(chroma, -i), minor_prof)[0, 1])
-            for i in range(12)
-        )
-
-        harmonic_valence = float(np.clip(0.5 + (major_corr - minor_corr) * 1.2, 0.1, 0.9))
+        if chroma_sum > 0 and np.std(chroma) > 1e-5:
+            major_corr = max(
+                float(np.corrcoef(np.roll(chroma, -i), major_prof)[0, 1])
+                for i in range(12)
+            )
+            minor_corr = max(
+                float(np.corrcoef(np.roll(chroma, -i), minor_prof)[0, 1])
+                for i in range(12)
+            )
+            harmonic_valence = float(np.clip(0.5 + (major_corr - minor_corr) * 1.2, 0.1, 0.9))
+        else:
+            harmonic_valence = 0.5
 
         # Спектральная яркость (Spectral Centroid / Тональный баланс высоких частот)
         centroid = float(np.sum(freqs * fft_mag) / (np.sum(fft_mag) + 1e-9))
@@ -115,13 +125,19 @@ def extract_audio_features(file_path: str, offset_seconds: float = 30.0, duratio
         # Интегральный Valence (35% гармонический лад, 35% яркость спектра, 30% танцевальный кач)
         valence = float(np.clip(0.35 * harmonic_valence + 0.35 * brightness + 0.30 * danceability, 0.05, 0.95))
 
+        import math
+        bpm = bpm if math.isfinite(bpm) and bpm > 0 else 120.0
+        energy = energy if math.isfinite(energy) else 0.5
+        valence = valence if math.isfinite(valence) else 0.5
+        danceability = danceability if math.isfinite(danceability) else 0.5
+
         # 6. Вектор признаков (16D)
         vector = [
             round(bpm / 180.0, 3),
             round(energy, 3),
             round(valence, 3),
             round(danceability, 3)
-        ] + [round(float(c), 3) for c in chroma[:12]]
+        ] + [round(float(c), 3) if math.isfinite(float(c)) else 0.0 for c in chroma[:12]]
 
         return {
             "bpm": round(bpm, 1),

@@ -169,3 +169,40 @@ def test_discovery_import_endpoint(client, auth_headers, monkeypatch):
     assert data["artist"] == "Test Artist"
     assert data["title"] == "Test Title"
     mock_import.assert_awaited_once_with("Test Artist", "Test Title")
+
+
+def test_library_analyzer_worker_progress(db_session):
+    from recommendations.analyzer import LibraryAnalyzer
+    from database.db import SessionLocal
+    # Создаем 3 неразмеченных трека
+    track_ids = []
+    for i in range(3):
+        t = Track(
+            title=f"Unanalyzed {i}",
+            artist=f"Artist {i}",
+            duration=120.0,
+            audio_format="mp3",
+            file_path=f"/nonexistent/path_{i}.mp3",
+            bpm=None,
+            energy=None,
+            valence=None,
+            loudness_lufs=None
+        )
+        db_session.add(t)
+        db_session.flush()
+        track_ids.append(t.id)
+    db_session.commit()
+
+    analyzer = LibraryAnalyzer(session_factory=SessionLocal)
+    for tid in track_ids:
+        analyzer._process_single_track(tid)
+
+    with SessionLocal() as verify_db:
+        status = analyzer.get_status(verify_db)
+        assert status["analyzed_tracks"] >= 3
+        for tid in track_ids:
+            refreshed = verify_db.query(Track).filter(Track.id == tid).first()
+            assert refreshed.bpm is not None
+            assert refreshed.energy is not None
+            assert refreshed.valence is not None
+            assert refreshed.loudness_lufs is not None

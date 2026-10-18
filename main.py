@@ -38,7 +38,6 @@ async def lifespan(app: FastAPI):
     try:
         from sqlalchemy import text
         with engine.connect() as conn:
-            conn.execute(text("SET statement_timeout = 2000;"))
             conn.execute(text("ALTER TABLE tracks ADD COLUMN IF NOT EXISTS loudness_lufs FLOAT, ADD COLUMN IF NOT EXISTS gain_db FLOAT, ADD COLUMN IF NOT EXISTS peak_db FLOAT, ADD COLUMN IF NOT EXISTS is_discovery BOOLEAN DEFAULT FALSE;"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tracks_is_discovery ON tracks (is_discovery);"))
             conn.execute(text("""

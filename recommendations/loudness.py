@@ -51,7 +51,15 @@ def measure_track_loudness(
             encoding="utf-8",
             errors="replace"
         )
-        _, stderr_text = proc.communicate(timeout=timeout_seconds)
+        try:
+            _, stderr_text = proc.communicate(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.communicate(timeout=2.0)
+            except Exception:
+                pass
+            return None
 
         if "Summary:" not in stderr_text and "Integrated loudness:" not in stderr_text:
             return None
@@ -64,9 +72,27 @@ def measure_track_loudness(
         if not i_match:
             return None
 
-        loudness_lufs = float(i_match.group(1))
-        peak_db = float(tp_match.group(1)) if tp_match else -1.0
-        lra = float(lra_match.group(1)) if lra_match else 0.0
+        import math
+        try:
+            raw_lufs = float(i_match.group(1))
+            loudness_lufs = raw_lufs if math.isfinite(raw_lufs) else -14.0
+        except Exception:
+            loudness_lufs = -14.0
+        loudness_lufs = max(-70.0, min(0.0, loudness_lufs))
+
+        try:
+            raw_peak = float(tp_match.group(1)) if tp_match else -1.0
+            peak_db = raw_peak if math.isfinite(raw_peak) else -1.0
+        except Exception:
+            peak_db = -1.0
+        peak_db = max(-70.0, min(0.0, peak_db))
+
+        try:
+            raw_lra = float(lra_match.group(1)) if lra_match else 0.0
+            lra = raw_lra if math.isfinite(raw_lra) else 0.0
+        except Exception:
+            lra = 0.0
+        lra = max(0.0, min(50.0, lra))
 
         # Расчет поправки: target - measured
         gain_db = target_lufs - loudness_lufs
@@ -79,6 +105,8 @@ def measure_track_loudness(
 
         # Разумные границы безопасности поправки: от -20 dB до +15 dB
         gain_db = max(-20.0, min(15.0, gain_db))
+        if not math.isfinite(gain_db):
+            gain_db = 0.0
 
         return {
             "loudness_lufs": round(loudness_lufs, 2),

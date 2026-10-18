@@ -1,6 +1,7 @@
+import os
 import time
 import threading
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Set
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, and_, not_, case
 
@@ -24,6 +25,7 @@ class LibraryAnalyzer:
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._lock = threading.RLock()
+        self._failed_track_ids: Set[int] = set()
 
         self.is_running = False
         self.total_tracks = 0
@@ -40,6 +42,7 @@ class LibraryAnalyzer:
                 return False
             self.is_running = True
             self._stop_event.clear()
+            self._failed_track_ids.clear()
             self.last_started_at = time.time()
 
         self._thread = threading.Thread(
@@ -62,120 +65,122 @@ class LibraryAnalyzer:
             self._thread = None
         print("[Analyzer] Фоновый анализ остановлен.")
 
+    def _apply_audio_features(self, track: Track):
+        """Извлекает аудиохарактеристики и нормализацию громкости, гарантируя валидные значения."""
+        file_path = track.file_path
+        features = None
+        loudness = None
+
+        # 1. Музыкальные и психоакустические характеристики (BPM, Energy, Valence)
+        if track.bpm is None or track.energy is None or track.valence is None:
+            try:
+                if file_path and os.path.exists(file_path):
+                    features = extract_audio_features(file_path)
+            except Exception as fe:
+                print(f"[Analyzer] Ошибка извлечения признаков {file_path}: {fe}")
+
+            if not features:
+                features = {
+                    "bpm": 120.0,
+                    "energy": 0.5,
+                    "valence": 0.5,
+                    "danceability": 0.5,
+                    "vector": [0.667, 0.5, 0.5, 0.5] + [0.0] * 12
+                }
+
+            track.bpm = features["bpm"]
+            track.energy = features["energy"]
+            track.valence = features["valence"]
+            track.danceability = features["danceability"]
+            track.embedding_json = serialize_vector(features["vector"])
+
+        # 2. Нормализация громкости ITU-R BS.1770 / EBU R128 (LUFS, Gain, True Peak)
+        if track.loudness_lufs is None:
+            try:
+                if file_path and os.path.exists(file_path):
+                    loudness = measure_track_loudness(file_path)
+            except Exception as le:
+                print(f"[Analyzer] Ошибка замера громкости {file_path}: {le}")
+
+            if loudness:
+                track.loudness_lufs = loudness["loudness_lufs"]
+                track.gain_db = loudness["gain_db"]
+                track.peak_db = loudness["peak_db"]
+            else:
+                track.loudness_lufs = -14.0
+                track.gain_db = 0.0
+                track.peak_db = -1.0
+
+    def _process_single_track(self, track_id: int):
+        """Обрабатывает один трек с немедленной фиксацией в БД (Real-time Progress & Crash Resilience)."""
+        db: Session = self.session_factory()
+        try:
+            track = db.query(Track).filter(Track.id == track_id).first()
+            if not track:
+                return
+
+            with self._lock:
+                self.current_track = f"{track.artist} - {track.title}"
+
+            self._apply_audio_features(track)
+            db.commit()
+
+            with self._lock:
+                self.analyzed_count += 1
+        except Exception as e:
+            db.rollback()
+            with self._lock:
+                self.errors_count += 1
+                self._failed_track_ids.add(track_id)
+            print(f"[Analyzer Error]: Не удалось зафиксировать трек #{track_id}: {e}")
+        finally:
+            db.close()
+
     def _worker_loop(self, batch_size: int):
         try:
             while not self._stop_event.is_set():
-                db: Session = self.session_factory()
-                try:
-                    # Находим треки без рассчитанных аудиохарактеристик или без замера громкости
-                    tracks_to_analyze = (
-                        db.query(Track)
-                        .filter(or_(
-                            Track.bpm.is_(None),
-                            Track.energy.is_(None),
-                            Track.valence.is_(None),
-                            Track.loudness_lufs.is_(None)
-                        ))
-                        .order_by(Track.id.asc())
-                        .limit(batch_size)
-                        .all()
-                    )
+                with self.session_factory() as db:
+                    query = db.query(Track.id).filter(or_(
+                        Track.bpm.is_(None),
+                        Track.energy.is_(None),
+                        Track.valence.is_(None),
+                        Track.loudness_lufs.is_(None)
+                    ))
+                    with self._lock:
+                        failed = set(self._failed_track_ids)
+                    if failed:
+                        query = query.filter(~Track.id.in_(failed))
 
-                    if not tracks_to_analyze:
-                        # Все треки проанализированы
-                        with self._lock:
-                            self.is_running = False
-                            self.last_completed_at = time.time()
-                            self.current_track = None
-                        print("[Analyzer] Все треки в фонотеке успешно проанализированы!")
+                    track_ids = [row[0] for row in query.order_by(Track.id.asc()).limit(batch_size).all()]
+
+                if not track_ids:
+                    with self._lock:
+                        self.is_running = False
+                        self.last_completed_at = time.time()
+                        self.current_track = None
+                    print("[Analyzer] Все треки в фонотеке успешно проанализированы!")
+                    break
+
+                for track_id in track_ids:
+                    if self._stop_event.is_set():
                         break
 
-                    for track in tracks_to_analyze:
-                        if self._stop_event.is_set():
-                            break
-
-                        with self._lock:
-                            self.current_track = f"{track.artist} - {track.title}"
-
-                        try:
-                            # 1. Музыкальные и психоакустические характеристики (BPM, Energy, Valence)
-                            if track.bpm is None or track.energy is None or track.valence is None:
-                                features = extract_audio_features(track.file_path)
-                                track.bpm = features["bpm"]
-                                track.energy = features["energy"]
-                                track.valence = features["valence"]
-                                track.danceability = features["danceability"]
-                                track.embedding_json = serialize_vector(features["vector"])
-
-                            # 2. Нормализация громкости ITU-R BS.1770 / EBU R128 (LUFS, Gain, True Peak)
-                            if track.loudness_lufs is None:
-                                loudness = measure_track_loudness(track.file_path)
-                                if loudness:
-                                    track.loudness_lufs = loudness["loudness_lufs"]
-                                    track.gain_db = loudness["gain_db"]
-                                    track.peak_db = loudness["peak_db"]
-                                else:
-                                    track.loudness_lufs = -14.0
-                                    track.gain_db = 0.0
-                                    track.peak_db = -1.0
-
-                            with self._lock:
-                                self.analyzed_count += 1
-                        except Exception as e:
-                            with self._lock:
-                                self.errors_count += 1
-                            if track.bpm is None:
-                                track.bpm = 120.0
-                                track.energy = 0.5
-                                track.valence = 0.5
-                                track.danceability = 0.5
-                                track.embedding_json = serialize_vector([0.667, 0.5, 0.5, 0.5] + [0.0] * 12)
-                            if track.loudness_lufs is None:
-                                track.loudness_lufs = -14.0
-                                track.gain_db = 0.0
-                                track.peak_db = -1.0
-
-                        # Микропауза для снижения нагрузки на диск и процессор
-                        time.sleep(0.02)
-
-                    db.commit()
-                except Exception as e:
-                    db.rollback()
-                    print(f"[Analyzer Error]: {e}")
-                    time.sleep(2.0)
-                finally:
-                    db.close()
+                    self._process_single_track(track_id)
+                    time.sleep(0.01)
 
         finally:
             with self._lock:
                 self.is_running = False
+                self.current_track = None
 
     def analyze_single_track(self, track_id: int, db: Session) -> Optional[Track]:
         """Анализирует один трек и сохраняет характеристики и громкость в БД."""
         track = db.query(Track).filter(Track.id == track_id).first()
-        if not track or not track.file_path:
+        if not track:
             return None
 
         try:
-            if track.bpm is None or track.energy is None or track.valence is None:
-                features = extract_audio_features(track.file_path)
-                track.bpm = features["bpm"]
-                track.energy = features["energy"]
-                track.valence = features["valence"]
-                track.danceability = features["danceability"]
-                track.embedding_json = serialize_vector(features["vector"])
-
-            if track.loudness_lufs is None:
-                loudness = measure_track_loudness(track.file_path)
-                if loudness:
-                    track.loudness_lufs = loudness["loudness_lufs"]
-                    track.gain_db = loudness["gain_db"]
-                    track.peak_db = loudness["peak_db"]
-                else:
-                    track.loudness_lufs = -14.0
-                    track.gain_db = 0.0
-                    track.peak_db = -1.0
-
+            self._apply_audio_features(track)
             db.commit()
             db.refresh(track)
             return track
