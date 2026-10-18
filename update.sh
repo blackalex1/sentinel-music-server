@@ -25,8 +25,12 @@ if command -v docker &> /dev/null; then
     # Пересборка с использованием кэша слоев и перезапуск
     $COMPOSE_CMD up -d --build
 
-    echo ">> [3/3] 📊 Текущий статус контейнеров:"
+    echo ">> [3/4] 📊 Текущий статус контейнеров:"
     $COMPOSE_CMD ps
+
+    echo ">> [4/4] 📜 Логи запуска сервисов (последние 40 строк):"
+    sleep 3
+    $COMPOSE_CMD logs --tail=40
 else
     echo "⚠️ Docker не найден. Файлы репозитория обновлены."
 fi
