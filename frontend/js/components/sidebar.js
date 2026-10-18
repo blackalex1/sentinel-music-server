@@ -9,7 +9,7 @@ export function renderSidebar() {
   return `
     <aside class="sidebar">
       <div class="brand-logo">
-        <img src="img/logo.svg" alt="Sentinel Logo" class="brand-logo-img" />
+        <img src="img/logo_mascot.png" alt="Sentinel Music Mascot" class="brand-logo-img" />
         <div class="brand-title">Sentinel <span>Music</span></div>
       </div>
 
