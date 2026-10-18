@@ -1,11 +1,30 @@
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-.pytest_cache
-tests
+# Системные директории постоянных данных (создаются PostgreSQL с root/postgres правами)
+pgdata/
+pgdata
+data/
+music/
+plugins/
+
+# Базы данных и файлы состояния
 *.db
 *.sqlite
+*.sqlite3
+*.log
 credentials.txt
+
+# Переменные окружения и секреты
 .env
+.env.*
+
+# Python и кэши
+__pycache__
+*.py[cod]
+*$py.class
+.pytest_cache
+tests
+
+# Git и дампы
 .git
+.github
+*.tar.gz
+*.zip
