@@ -161,11 +161,11 @@ export function setupUserPill() {
           clearAuthToken();
           updateState('isAuthenticated', false);
           updateState('currentUser', null);
-          location.reload();
+          window.location.replace('login.html');
         });
       }
     } else {
-      showAuthModal();
+      window.location.replace('login.html');
     }
   });
 }

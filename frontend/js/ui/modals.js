@@ -498,17 +498,7 @@ export function setupModals() {
 
 
 export function showAuthModal(isRegister = false) {
-  const modal = document.getElementById('authModal');
-  const title = document.getElementById('authModalTitle');
-  const submitBtn = document.getElementById('authSubmitBtn');
-  const form = document.getElementById('authForm');
-
-  if (modal) {
-    if (form) form.dataset.mode = isRegister ? 'register' : 'login';
-    if (title) title.textContent = isRegister ? 'Регистрация администратора' : 'Вход в аккаунт';
-    if (submitBtn) submitBtn.textContent = isRegister ? 'Создать аккаунт' : 'Войти';
-    modal.classList.add('active');
-  }
+  window.location.replace('login.html');
 }
 
 export function hideAuthModal() {

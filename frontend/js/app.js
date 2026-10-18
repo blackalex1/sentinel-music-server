@@ -4,7 +4,7 @@
  */
 
 import { state, updateState } from './state.js';
-import { getAuthToken } from './config.js';
+import { getAuthToken, clearAuthToken } from './config.js';
 import { apiFetch, checkAuthStatus } from './api.js';
 import { initPlayer, togglePlay, nextTrack, prevTrack, seekTime, setVolume, toggleMute, toggleShuffle, toggleRepeat, restorePlaybackSession, restorePlaybackFromRemote } from './player.js';
 import { initStream } from './stream.js';
@@ -17,6 +17,12 @@ import { loadFrontendPlugins } from './pluginLoader.js';
 import { initRemoteConnect } from './remote.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
+  const token = getAuthToken();
+  if (!token) {
+    window.location.replace('login.html');
+    return;
+  }
+
   // 0. Модульная сборка и монтирование интерфейса из компонентов
   mountLayout(document.getElementById('app'));
 
@@ -90,22 +96,13 @@ async function bootstrapApp() {
         return;
       }
     } catch (e) {
-      console.warn('Токен сессии недействителен, требуется повторный вход');
+      console.warn('Токен сессии недействителен, требуется повторный вход:', e);
     }
   }
 
-  // Проверяем статус сервера (первичная настройка или стандартный вход)
-  try {
-    const status = await checkAuthStatus();
-    if (!status.initialized) {
-      showAuthModal(true); // Первый запуск — регистрация администратора
-    } else {
-      showAuthModal(false); // Стандартный вход
-    }
-  } catch (err) {
-    console.error('Ошибка проверки состояния сервера:', err);
-    showAuthModal(false);
-  }
+  // Если токен отсутствует или не прошел проверку — перенаправляем на отдельную страницу авторизации
+  clearAuthToken();
+  window.location.replace('login.html');
 }
 
 /**

@@ -158,9 +158,9 @@ export function initUI() {
     updatePlayerReactionsUI(track);
   });
 
-  // Открытие окна авторизации при событии
+  // Перенаправление на страницу авторизации при событии истечения сессии
   window.addEventListener('auth:required', () => {
-    showAuthModal();
+    window.location.replace('login.html');
   });
 
   // Глобальный слушатель всплывающих уведомлений

@@ -158,6 +158,15 @@ plugin_manager.mount_plugin_assets(app)
 # Подключение фронтенда (Web / Tauri WebView)
 frontend_dir = os.path.join(os.path.dirname(__file__), "frontend")
 if os.path.exists(frontend_dir):
+    from fastapi.responses import FileResponse, RedirectResponse
+
+    @app.api_route("/login", methods=["GET", "HEAD"], include_in_schema=False)
+    async def login_page():
+        login_path = os.path.join(frontend_dir, "login.html")
+        if os.path.exists(login_path):
+            return FileResponse(login_path)
+        return RedirectResponse(url="/")
+
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
 
 

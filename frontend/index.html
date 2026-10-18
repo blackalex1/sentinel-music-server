@@ -6,6 +6,14 @@
   <title>Sentinel Music — Фонотека и Поток</title>
   <link rel="icon" type="image/svg+xml" href="img/logo.svg">
   
+  <!-- Мгновенная проверка авторизации перед отрисовкой интерфейса -->
+  <script type="module">
+    import { getAuthToken } from './js/config.js';
+    if (!getAuthToken()) {
+      window.location.replace('login.html');
+    }
+  </script>
+
   <!-- Шрифт Outfit и модульные стили Sentinel Design System -->
   <link rel="stylesheet" href="libs/outfit/outfit.css">
   <link rel="stylesheet" href="styles/variables.css">
@@ -32,6 +40,6 @@
   <div id="app"></div>
 
   <!-- Модульный загрузчик приложения -->
-  <script type="module" src="js/app.js?v=1.6.9"></script>
+  <script type="module" src="js/app.js?v=1.7.0"></script>
 </body>
 </html>

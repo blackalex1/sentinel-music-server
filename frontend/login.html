@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Авторизация — Sentinel Music</title>
+  <link rel="icon" type="image/svg+xml" href="img/logo.svg">
+
+  <!-- Шрифт Outfit и модульные стили Sentinel Design System -->
+  <link rel="stylesheet" href="libs/outfit/outfit.css">
+  <link rel="stylesheet" href="styles/variables.css">
+  <link rel="stylesheet" href="styles/login.css?v=1.0.0">
+</head>
+<body class="login-page">
+
+  <!-- Фоновые неоновые световые акценты -->
+  <div class="login-bg-glow"></div>
+
+  <!-- Карточка авторизации -->
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="logo-wrapper">
+        <img src="img/logo.svg" alt="Sentinel Logo" class="brand-logo">
+      </div>
+      <h1 class="brand-title">Sentinel Music</h1>
+      <p class="brand-subtitle" id="authSubtitle">Персональная фонотека и векторный Поток</p>
+    </div>
+
+    <!-- Вкладки переключения режима (Вход / Регистрация) -->
+    <div class="auth-tabs" id="authTabs">
+      <button type="button" class="auth-tab active" data-mode="login" id="tabLogin">Вход</button>
+      <button type="button" class="auth-tab" data-mode="register" id="tabRegister">Регистрация</button>
+    </div>
+
+    <!-- Информационный баннер (для первого запуска) -->
+    <div class="login-info" id="loginInfo" style="display: none;">
+      <svg class="svg-icon" viewBox="0 0 24 24" style="flex-shrink:0; width:18px; height:18px;">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="16" x2="12" y2="12"></line>
+        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+      </svg>
+      <span id="infoText">Первый запуск: зарегистрируйте учетную запись администратора.</span>
+    </div>
+
+    <!-- Баннер ошибки -->
+    <div class="login-error" id="loginError" style="display: none;">
+      <svg class="svg-icon" viewBox="0 0 24 24" style="flex-shrink:0; width:18px; height:18px;">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+      <span id="errorText"></span>
+    </div>
+
+    <!-- Форма авторизации -->
+    <form id="loginForm" autocomplete="on">
+      <div class="form-group">
+        <label class="form-label" for="usernameInput">Имя пользователя</label>
+        <div class="input-wrapper">
+          <svg class="svg-icon input-icon" viewBox="0 0 24 24">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+          <input
+            type="text"
+            id="usernameInput"
+            class="form-input"
+            placeholder="Введите ваш логин"
+            autocomplete="username"
+            required
+            autofocus
+          >
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="passwordInput">Пароль</label>
+        <div class="input-wrapper">
+          <svg class="svg-icon input-icon" viewBox="0 0 24 24">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          <input
+            type="password"
+            id="passwordInput"
+            class="form-input"
+            placeholder="Введите пароль"
+            autocomplete="current-password"
+            required
+          >
+          <button type="button" class="toggle-password-btn" id="togglePasswordBtn" title="Показать/скрыть пароль">
+            <svg class="svg-icon" id="eyeIcon" viewBox="0 0 24 24">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Повтор пароля (только при регистрации) -->
+      <div class="form-group" id="confirmPasswordGroup" style="display: none;">
+        <label class="form-label" for="confirmPasswordInput">Подтверждение пароля</label>
+        <div class="input-wrapper">
+          <svg class="svg-icon input-icon" viewBox="0 0 24 24">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          <input
+            type="password"
+            id="confirmPasswordInput"
+            class="form-input"
+            placeholder="Повторите пароль"
+            autocomplete="new-password"
+          >
+        </div>
+      </div>
+
+      <button type="submit" class="btn-submit" id="submitBtn">
+        <span id="submitBtnText">Войти в систему</span>
+      </button>
+    </form>
+
+    <div class="login-footer">
+      Sentinel Music Ecosystem &bull; Self-Hosted Stream Platform
+    </div>
+  </div>
+
+  <!-- Модульная логика страницы авторизации -->
+  <script type="module">
+    import { getAuthToken, setAuthToken, setCurrentUser, clearAuthToken } from './js/config.js';
+    import { checkAuthStatus, apiLogin, apiRegister, apiFetch } from './js/api.js';
+
+    let currentMode = 'login'; // 'login' | 'register'
+
+    const form = document.getElementById('loginForm');
+    const usernameInput = document.getElementById('usernameInput');
+    const passwordInput = document.getElementById('passwordInput');
+    const confirmPasswordInput = document.getElementById('confirmPasswordInput');
+    const confirmPasswordGroup = document.getElementById('confirmPasswordGroup');
+    const submitBtn = document.getElementById('submitBtn');
+    const submitBtnText = document.getElementById('submitBtnText');
+    const errorBox = document.getElementById('loginError');
+    const errorText = document.getElementById('errorText');
+    const infoBox = document.getElementById('loginInfo');
+    const tabLogin = document.getElementById('tabLogin');
+    const tabRegister = document.getElementById('tabRegister');
+    const authTabs = document.getElementById('authTabs');
+    const togglePasswordBtn = document.getElementById('togglePasswordBtn');
+    const authSubtitle = document.getElementById('authSubtitle');
+
+    function showError(msg) {
+      errorText.textContent = msg;
+      errorBox.style.display = 'flex';
+    }
+
+    function hideError() {
+      errorBox.style.display = 'none';
+      errorText.textContent = '';
+    }
+
+    function setMode(mode) {
+      currentMode = mode;
+      hideError();
+
+      if (mode === 'register') {
+        tabRegister.classList.add('active');
+        tabLogin.classList.remove('active');
+        confirmPasswordGroup.style.display = 'block';
+        confirmPasswordInput.required = true;
+        passwordInput.autocomplete = 'new-password';
+        submitBtnText.textContent = 'Зарегистрироваться';
+        authSubtitle.textContent = 'Создание нового профиля слушателя';
+      } else {
+        tabLogin.classList.add('active');
+        tabRegister.classList.remove('active');
+        confirmPasswordGroup.style.display = 'none';
+        confirmPasswordInput.required = false;
+        passwordInput.autocomplete = 'current-password';
+        submitBtnText.textContent = 'Войти в систему';
+        authSubtitle.textContent = 'Персональная фонотека и векторный Поток';
+      }
+    }
+
+    // Переключение пароля (show/hide)
+    togglePasswordBtn.addEventListener('click', () => {
+      const isPwd = passwordInput.type === 'password';
+      passwordInput.type = isPwd ? 'text' : 'password';
+      togglePasswordBtn.style.color = isPwd ? 'var(--primary)' : 'var(--text-muted)';
+    });
+
+    // Переключение вкладок
+    tabLogin.addEventListener('click', () => setMode('login'));
+    tabRegister.addEventListener('click', () => setMode('register'));
+
+    // Инициализация страницы
+    async function initPage() {
+      // 1. Проверяем, авторизован ли пользователь уже
+      const existingToken = getAuthToken();
+      if (existingToken) {
+        try {
+          const res = await apiFetch('/api/auth/me');
+          if (res.ok) {
+            window.location.replace('index.html');
+            return;
+          } else {
+            clearAuthToken();
+          }
+        } catch (_) {
+          // Сервер недоступен или ошибка сети — остаёмся на форме
+        }
+      }
+
+      // 2. Проверяем статус сервера (первичный запуск без админа)
+      try {
+        const status = await checkAuthStatus();
+        if (status && !status.initialized) {
+          infoBox.style.display = 'flex';
+          authTabs.style.display = 'none';
+          setMode('register');
+          submitBtnText.textContent = 'Создать администратора';
+          authSubtitle.textContent = 'Первоначальная настройка Sentinel Music';
+        }
+      } catch (err) {
+        console.warn('Не удалось запросить статус инициализации сервера:', err);
+      }
+    }
+
+    // Обработка отправки формы
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      hideError();
+
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value.trim();
+
+      if (!username || !password) {
+        showError('Пожалуйста, заполните имя пользователя и пароль.');
+        return;
+      }
+
+      if (currentMode === 'register') {
+        const confirmPassword = confirmPasswordInput.value.trim();
+        if (password !== confirmPassword) {
+          showError('Введенные пароли не совпадают.');
+          confirmPasswordInput.focus();
+          return;
+        }
+        if (password.length < 4) {
+          showError('Пароль должен содержать не менее 4 символов.');
+          passwordInput.focus();
+          return;
+        }
+      }
+
+      // Блокируем кнопку на время запроса
+      submitBtn.disabled = true;
+      const originalText = submitBtnText.textContent;
+      submitBtnText.textContent = 'Проверка...';
+
+      try {
+        const res = currentMode === 'register'
+          ? await apiRegister(username, password)
+          : await apiLogin(username, password);
+
+        const data = await res.json();
+
+        if (res.ok && data.token) {
+          setAuthToken(data.token);
+          setCurrentUser({ username: data.username || username });
+          // Мгновенный переход в приложение
+          window.location.replace('index.html');
+        } else {
+          showError(data.detail || 'Неверное имя пользователя или пароль.');
+          submitBtn.disabled = false;
+          submitBtnText.textContent = originalText;
+        }
+      } catch (err) {
+        showError('Не удалось соединиться с сервером. Проверьте подключение.');
+        submitBtn.disabled = false;
+        submitBtnText.textContent = originalText;
+      }
+    });
+
+    initPage();
+  </script>
+</body>
+</html>
