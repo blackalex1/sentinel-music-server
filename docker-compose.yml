@@ -46,6 +46,8 @@ services:
       - "${MUSIC_DIR:-./music}:/music:rw"
       # Папка для локального кэша и файлов приложения
       - "${DATA_DIR:-./data}:/app/data:rw"
+      # Внешняя папка для плагинов (подхватываются без пересборки контейнера)
+      - "${PLUGINS_DIR:-./plugins}:/app/plugins:rw"
     networks:
       - music-net
 

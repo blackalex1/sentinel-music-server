@@ -32,6 +32,7 @@ MUSIC_DIR=./music
 # Каталоги постоянных данных и базы данных
 DATA_DIR=./data
 PGDATA_DIR=./pgdata
+PLUGINS_DIR=./plugins
 
 # База данных PostgreSQL (сгенерировано случайно)
 POSTGRES_DB=music_db
