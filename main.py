@@ -81,6 +81,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[Server Startup] Очистка отсутствующих треков: {e}")
 
+    # Автоматическое фоновое сканирование новых треков при старте
+    import asyncio
+    async def run_startup_scan():
+        await asyncio.sleep(1)
+        try:
+            from streaming.scanner import scan_directory
+            def do_scan():
+                with SessionLocal() as db:
+                    return scan_directory(settings.MUSIC_DIR, db)
+            added = await asyncio.to_thread(do_scan)
+            if added > 0:
+                print(f"[Server Startup] Автосканирование завершено: добавлено {added} новых треков")
+        except Exception as e:
+            print(f"[Server Startup] Ошибка автосканирования: {e}")
+
+    asyncio.create_task(run_startup_scan())
+
     # Запуск фонового воркера автономного буфера новинок (Discovery Buffer & TTL Retention)
     from recommendations.buffer_manager import discovery_buffer_manager
     discovery_buffer_manager.session_factory = SessionLocal
