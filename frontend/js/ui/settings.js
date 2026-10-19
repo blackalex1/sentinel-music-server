@@ -15,6 +15,7 @@ import { showConfirm } from './notifications.js';
 import { icon } from '../icons.js';
 import { updateUserInfoUI } from './playerControls.js';
 import { openQrModal } from './modals.js';
+import { switchView } from './navigation.js';
 
 export function initSettingsView() {
   setupProfileForm();
@@ -130,6 +131,19 @@ function setupServerHostForm() {
   if (btnQr) {
     btnQr.addEventListener('click', () => {
       openQrModal();
+    });
+  }
+
+  // Кнопка быстрого перехода к отчету пакетного скачивания
+  const btnOpenBatch = document.getElementById('btnOpenBatchFromSettings');
+  if (btnOpenBatch) {
+    btnOpenBatch.addEventListener('click', async () => {
+      try {
+        await apiFetch('/api/task-import/unhide', { method: 'POST' });
+      } catch (e) {}
+      const navItem = document.getElementById('navItemBatchImport');
+      if (navItem) navItem.style.display = 'flex';
+      switchView('batchImport');
     });
   }
 }

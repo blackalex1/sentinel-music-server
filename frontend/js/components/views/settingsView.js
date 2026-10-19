@@ -92,6 +92,20 @@ export function renderSettingsView() {
                 </button>
               </div>
             </form>
+
+            <div id="batchReportSettingsBlock" style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <div>
+                <div style="font-size: 0.88rem; font-weight: 600; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+                  ${icon('download', { size: 16 })} <span>Отчет пакетного скачивания</span>
+                </div>
+                <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 2px;">
+                  Просмотр статуса последней ночной загрузки треков и экспорт отчетов
+                </div>
+              </div>
+              <button type="button" class="btn-secondary" id="btnOpenBatchFromSettings" style="display: inline-flex; align-items: center; gap: 8px;">
+                ${icon('stream', { size: 15 })} <span>Открыть отчет</span>
+              </button>
+            </div>
           </div>
 
           <!-- 3. Карточка SSL / HTTPS (Доступна администратору) -->

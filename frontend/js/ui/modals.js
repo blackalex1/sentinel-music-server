@@ -3,7 +3,7 @@
  */
 
 import { state, updateState } from '../state.js';
-import { apiLogin, apiRegister, createPlaylist, addTrackToPlaylist, deleteTrack, uploadTrackFiles, fetchQrCode, fetchQrHosts } from '../api.js';
+import { apiFetch, apiLogin, apiRegister, createPlaylist, addTrackToPlaylist, deleteTrack, uploadTrackFiles, fetchQrCode, fetchQrHosts } from '../api.js';
 import { setAuthToken, getServerHost, setServerHost, API_BASE } from '../config.js';
 import { showToast, escapeHtml } from './toast.js';
 import { handleTrackDeleted } from '../player.js';
@@ -474,6 +474,19 @@ export function setupModals() {
         if (cancelBtn) cancelBtn.disabled = false;
         if (dropZone) dropZone.style.pointerEvents = 'auto';
       }
+    });
+  }
+
+  const btnOpenBatchModal = document.getElementById('btnOpenBatchFromUploadModal');
+  if (btnOpenBatchModal) {
+    btnOpenBatchModal.addEventListener('click', async () => {
+      hideUploadTracksModal();
+      try {
+        await apiFetch('/api/task-import/unhide', { method: 'POST' });
+      } catch (err) {}
+      const navItem = document.getElementById('navItemBatchImport');
+      if (navItem) navItem.style.display = 'flex';
+      switchView('batchImport');
     });
   }
 }
