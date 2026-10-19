@@ -79,9 +79,14 @@ export function renderSettingsView() {
               </div>
 
               <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; gap: 12px; flex-wrap: wrap;">
-                <button type="button" class="btn-secondary" id="btnScreenOpenQr" style="display: inline-flex; align-items: center; gap: 8px;">
-                  ${icon('qr', { size: 16 })} <span>Показать QR-код сопряжения</span>
-                </button>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <button type="button" class="btn-secondary" id="btnScreenOpenQr" style="display: inline-flex; align-items: center; gap: 8px;">
+                    ${icon('qr', { size: 16 })} <span>Показать QR-код сопряжения</span>
+                  </button>
+                  <button type="button" class="settings-btn" id="sentinelConnectBadge" title="Sentinel Connect (Управление с телефона)" style="width: 36px; height: 36px;">
+                    ${icon('cast', { size: 18 })}
+                  </button>
+                </div>
                 <button type="submit" class="btn-primary">
                   Сохранить URL
                 </button>

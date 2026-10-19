@@ -142,11 +142,17 @@ app.add_middleware(
 
 @app.middleware("http")
 async def add_security_headers(request, call_next):
-    """Добавляет базовые защитные HTTP-заголовки к ответам сервера."""
+    """Добавляет базовые защитные HTTP-заголовки к ответам сервера и предотвращает устаревание статики."""
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+    # Для интерфейсных файлов отключаем агрессивный кэш браузера, чтобы обновления применялись сразу
+    path = request.url.path
+    if path == "/" or path.endswith((".html", ".js", ".css")):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+
     return response
 
 # Подключение модульного API роутера

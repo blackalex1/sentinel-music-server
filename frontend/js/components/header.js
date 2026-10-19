@@ -15,12 +15,6 @@ export function renderHeader() {
       </div>
 
       <div class="header-actions">
-        <button class="settings-btn" id="sentinelConnectBadge" title="Sentinel Connect (Управление с телефона)">
-          ${icon('cast', { size: 19 })}
-        </button>
-        <button class="settings-btn" id="btnQrConnect" title="Подключить смартфон (QR-код)">
-          ${icon('qr', { size: 19 })}
-        </button>
         <div class="user-badge" id="userBadge" title="Профиль пользователя">
           <div class="user-avatar" id="userAvatar">S</div>
           <span id="userName">Войти</span>
