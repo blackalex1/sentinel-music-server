@@ -20,6 +20,8 @@ plugins/*
 *downloader*
 *.private.*
 *.secret.*
+*tracks*.txt
+test_*.txt
 
 # ==========================================
 # Базы данных и файлы состояния
