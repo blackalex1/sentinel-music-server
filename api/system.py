@@ -157,3 +157,79 @@ def stop_watcher(
     music_watcher.stop()
     return {"status": "stopped", "details": music_watcher.status()}
 
+
+class SslGenerateRequest:
+    pass
+
+from pydantic import BaseModel
+
+class SslRequest(BaseModel):
+    domain: str
+    email: Optional[str] = ""
+    is_self_signed: bool = False
+
+
+@router.get("/ssl/status")
+@router.get("/system/ssl/status")
+def get_ssl_certificate_status(
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Возвращает информацию о текущем SSL-сертификате сервера."""
+    from core.ssl import get_ssl_status
+    return get_ssl_status()
+
+
+@router.post("/ssl/generate")
+@router.post("/system/ssl/generate")
+async def generate_ssl_certificate(
+    payload: SslRequest,
+    current_user: User = Depends(get_current_admin_user)
+):
+    """
+    Выпуск SSL-сертификата (требуются права администратора):
+    - При is_self_signed=True: мгновенная генерация самоподписанного сертификата для домена / IP.
+    - При is_self_signed=False: автоматический выпуск доверенного сертификата Let's Encrypt через ACME HTTP-01.
+    """
+    import re
+    import ipaddress
+    domain = payload.domain.strip()
+    email = (payload.email or "").strip()
+
+    if not domain:
+        raise HTTPException(status_code=400, detail="Укажите доменное имя")
+
+    is_valid_domain = bool(re.match(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$", domain)) or domain == "localhost"
+    is_valid_ip = False
+    try:
+        ipaddress.ip_address(domain)
+        is_valid_ip = True
+    except ValueError:
+        pass
+
+    if payload.is_self_signed:
+        if not (is_valid_domain or is_valid_ip or re.match(r"^[a-zA-Z0-9_\-\.]{1,100}$", domain)):
+            raise HTTPException(status_code=400, detail="Некорректное доменное имя или IP-адрес для самоподписанного сертификата")
+    else:
+        if not is_valid_domain:
+            raise HTTPException(status_code=400, detail="Некорректный формат доменного имени (например, music.mydomain.com)")
+        if email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            raise HTTPException(status_code=400, detail="Некорректный адрес электронной почты")
+
+    import asyncio
+    from core.ssl import request_ssl_cert, generate_self_signed_cert, get_ssl_status
+
+    if payload.is_self_signed:
+        success, msg = await asyncio.to_thread(generate_self_signed_cert, domain)
+    else:
+        success, msg = await asyncio.to_thread(request_ssl_cert, domain, email)
+
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+
+    return {
+        "status": "success",
+        "message": msg,
+        "ssl_details": get_ssl_status()
+    }
+
+

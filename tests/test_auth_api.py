@@ -34,10 +34,19 @@ def test_register_validation_and_duplicate(client):
     res1 = client.post("/api/auth/register", json={"username": "alice", "password": "password123"})
     assert res1.status_code == 200
 
-    # Попытка дублирования логина
-    res2 = client.post("/api/auth/register", json={"username": "alice", "password": "another_password"})
+    # Попытка дублирования логина администратором -> 400
+    token = res1.json()["token"]
+    res2 = client.post(
+        "/api/auth/register",
+        json={"username": "alice", "password": "another_password"},
+        headers={"Authorization": f"Bearer {token}"}
+    )
     assert res2.status_code == 400
     assert "уже существует" in res2.json()["detail"]
+
+    # Попытка публичной регистрации без авторизации админа -> 403
+    res3 = client.post("/api/auth/register", json={"username": "eve", "password": "password123"})
+    assert res3.status_code == 403
 
 
 def test_login_success_and_failure(client):
@@ -195,4 +204,120 @@ def test_logout_with_query_token_and_qr_existing_session(client):
 
     # Проверяем недействительность токена
     assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+
+
+def test_admin_user_management(client):
+    """Тест создания, получения списка и удаления пользователей администратором."""
+    # Регистрация первого пользователя (автоматически становится админом)
+    r_admin = client.post("/api/auth/register", json={"username": "root_admin", "password": "root_password"})
+    admin_token = r_admin.json()["token"]
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # Админ создает нового обычного пользователя
+    r_create = client.post("/api/auth/users", json={
+        "username": "sub_user",
+        "password": "sub_password",
+        "is_admin": False
+    }, headers=admin_headers)
+    assert r_create.status_code == 200
+    sub_user_id = r_create.json()["user"]["id"]
+
+    # Проверяем, что созданный пользователь может войти
+    r_login = client.post("/api/auth/login", json={
+        "username": "sub_user",
+        "password": "sub_password"
+    })
+    assert r_login.status_code == 200
+    sub_token = r_login.json()["token"]
+    sub_headers = {"Authorization": f"Bearer {sub_token}"}
+
+    # Не-админ не имеет доступа к списку и созданию пользователей
+    r_forbidden = client.get("/api/auth/users", headers=sub_headers)
+    assert r_forbidden.status_code == 403
+
+    # Админ запрашивает список пользователей
+    r_list = client.get("/api/auth/users", headers=admin_headers)
+    assert r_list.status_code == 200
+    usernames = [u["username"] for u in r_list.json()]
+    assert "root_admin" in usernames
+    assert "sub_user" in usernames
+
+    # Админ удаляет пользователя
+    r_delete = client.delete(f"/api/auth/users/{sub_user_id}", headers=admin_headers)
+    assert r_delete.status_code == 200
+
+    # Проверяем в БД, что пользователь, его сессии и устройства удалены без следа
+    from database.models import User, SessionToken, UserDevice
+    from database.db import SessionLocal
+    with SessionLocal() as db:
+        assert db.query(User).filter(User.id == sub_user_id).first() is None
+        assert db.query(SessionToken).filter(SessionToken.user_id == sub_user_id).count() == 0
+        assert db.query(UserDevice).filter(UserDevice.user_id == sub_user_id).count() == 0
+
+    # Удаленный пользователь больше не может войти
+    r_login_after = client.post("/api/auth/login", json={
+        "username": "sub_user",
+        "password": "sub_password"
+    })
+    assert r_login_after.status_code == 401
+
+
+def test_update_user_profile(client):
+    """Тест изменения имени пользователя и пароля с валидацией текущего пароля."""
+    # Регистрация пользователя
+    reg = client.post("/api/auth/register", json={"username": "profile_user", "password": "old_password_123"})
+    token = reg.json()["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Попытка с неверным текущим паролем -> 400
+    res_bad_pwd = client.post("/api/auth/profile", json={
+        "current_password": "wrong_password",
+        "new_username": "new_profile_user"
+    }, headers=headers)
+    assert res_bad_pwd.status_code == 400
+    assert "Неверный текущий пароль" in res_bad_pwd.json()["detail"]
+
+    # Успешное изменение логина и пароля
+    res_ok = client.post("/api/auth/profile", json={
+        "current_password": "old_password_123",
+        "new_username": "updated_user",
+        "new_password": "new_password_456"
+    }, headers=headers)
+    assert res_ok.status_code == 200
+    assert res_ok.json()["user"]["username"] == "updated_user"
+
+    # Вход со старым паролем больше не работает
+    res_old_login = client.post("/api/auth/login", json={
+        "username": "updated_user",
+        "password": "old_password_123"
+    })
+    assert res_old_login.status_code == 401
+
+    # Вход с новыми учетными данными успешен
+    res_new_login = client.post("/api/auth/login", json={
+        "username": "updated_user",
+        "password": "new_password_456"
+    })
+    assert res_new_login.status_code == 200
+
+
+def test_username_validation(client, auth_headers):
+    """Проверяет отклонение некорректных имен пользователей (символы, длина)."""
+    # Спецсимволы и пробелы
+    res_invalid_chars = client.post("/api/auth/users", json={
+        "username": "user name with spaces",
+        "password": "valid_password",
+        "is_admin": False
+    }, headers=auth_headers)
+    assert res_invalid_chars.status_code == 400
+    assert "недопустимые символы" in res_invalid_chars.json()["detail"].lower()
+
+    # Слишком короткое имя
+    res_short = client.post("/api/auth/users", json={
+        "username": "ab",
+        "password": "valid_password",
+        "is_admin": False
+    }, headers=auth_headers)
+    assert res_short.status_code == 400
+
 

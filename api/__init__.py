@@ -11,6 +11,7 @@ from api.playlists import router as playlists_router
 from api.system import router as system_router
 from api.covers import router as covers_router
 from api.remote import router as remote_router
+from api.task_import import router as task_import_router
 
 # Единый агрегатор всех модульных API роутеров.
 # ВАЖНО: Статические маршруты регистрируются ДО параметризованных {id}:
@@ -29,3 +30,4 @@ api_router.include_router(playlists_router)
 api_router.include_router(system_router)
 api_router.include_router(covers_router)
 api_router.include_router(remote_router)
+api_router.include_router(task_import_router)

@@ -1,9 +1,11 @@
 import io
+import re
 import json
 import base64
 import socket
 import urllib.parse
 import qrcode
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request, Response
 from sqlalchemy.orm import Session
@@ -15,13 +17,15 @@ from threading import Lock
 import os
 from core.config import settings
 from database.db import get_db
-from database.models import User, SessionToken
+from database.models import User, SessionToken, UserDevice
 from core.security import (
     hash_password,
     verify_password,
     dummy_verify_password,
     generate_session_token,
-    get_current_user
+    get_current_user,
+    get_current_admin_user,
+    get_current_user_optional
 )
 
 router = APIRouter(prefix="/auth", tags=["Аутентификация"])
@@ -168,20 +172,44 @@ def get_auth_status(db: Session = Depends(get_db)):
     return {"initialized": count > 0}
 
 
-@router.post("/register")
-def register_user(payload: RegisterRequest, db: Session = Depends(get_db)):
-    """Регистрация пользователя (первый пользователь становится администратором)."""
-    user_count = db.query(User).count()
-    allow_reg = os.getenv("ALLOW_REGISTRATION", "true").lower() in ("true", "1", "yes")
-    if user_count > 0 and not allow_reg:
-        raise HTTPException(
-            status_code=403,
-            detail="Регистрация новых пользователей отключена администратором"
-        )
+class CreateUserAdminRequest(BaseModel):
+    username: str
+    password: str
+    is_admin: bool = False
 
-    username = payload.username.strip()
-    if len(username) < 3 or len(payload.password) < 4:
-        raise HTTPException(status_code=400, detail="Логин от 3 символов, пароль от 4 символов")
+
+def validate_username(username: str) -> str:
+    """Проверяет валидность имени пользователя (длина 3-50, допустимые символы без управляющих)."""
+    uname = (username or "").strip()
+    if len(uname) < 3 or len(uname) > 50:
+        raise HTTPException(status_code=400, detail="Имя пользователя должно содержать от 3 до 50 символов")
+    if not re.match(r"^[\w\.\-@а-яА-ЯёЁ]+$", uname, re.UNICODE):
+        raise HTTPException(status_code=400, detail="Имя пользователя содержит недопустимые символы")
+    return uname
+
+
+@router.post("/register")
+def register_user(
+    payload: RegisterRequest,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    """
+    Регистрация пользователя:
+    1. Если в системе еще нет пользователей (первый запуск) — разрешено создание первого администратора.
+    2. Если пользователи уже есть — регистрацию может производить ТОЛЬКО действующий администратор.
+    """
+    user_count = db.query(User).count()
+    if user_count > 0:
+        if not current_user or not current_user.is_admin:
+            raise HTTPException(
+                status_code=403,
+                detail="Публичная регистрация отключена. Создавать новых пользователей может только администратор в настройках аккаунта."
+            )
+
+    username = validate_username(payload.username)
+    if len(payload.password) < 4:
+        raise HTTPException(status_code=400, detail="Пароль должен содержать от 4 символов")
 
     existing = db.query(User).filter(User.username == username).first()
     if existing:
@@ -204,6 +232,114 @@ def register_user(payload: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
 
     return {"status": "ok", "token": token_str, "username": user.username, "is_admin": user.is_admin}
+
+
+@router.get("/users")
+def list_users(
+    admin_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Список всех пользователей системы (доступно только администратору)."""
+    users = db.query(User).order_by(User.id.asc()).all()
+    return [
+        {
+            "id": u.id,
+            "username": u.username,
+            "is_admin": u.is_admin,
+            "created_at": getattr(u, "created_at", None)
+        }
+        for u in users
+    ]
+
+
+@router.post("/users")
+def admin_create_user(
+    payload: CreateUserAdminRequest,
+    admin_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Создание нового пользователя администратором в настройках."""
+    username = validate_username(payload.username)
+    if len(payload.password) < 4:
+        raise HTTPException(status_code=400, detail="Пароль должен содержать от 4 символов")
+
+    existing = db.query(User).filter(User.username == username).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Пользователь с таким логином уже существует")
+
+    salt, p_hash = hash_password(payload.password)
+    user = User(
+        username=username,
+        password_hash=p_hash,
+        salt=salt,
+        is_admin=payload.is_admin
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "status": "success",
+        "message": f"Пользователь «{user.username}» успешно создан",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "is_admin": user.is_admin
+        }
+    }
+
+
+@router.delete("/users/{user_id}")
+async def admin_delete_user(
+    user_id: int,
+    admin_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Полное удаление пользователя администратором.
+    Удаляет пользователя из базы данных и очищает всю связанную с ним информацию:
+    - Активные и сохранённые сессии (SessionToken)
+    - Зарегистрированные устройства (UserDevice)
+    - Закрывает живые WebSocket-соединения Sentinel Connect
+    """
+    if admin_user.id == user_id:
+        raise HTTPException(status_code=400, detail="Нельзя удалить собственный аккаунт администратора")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    username = user.username
+
+    # 1. Принудительное отключение активных подключений в Remote Connect
+    try:
+        from api.remote import remote_manager
+        conn_dict = remote_manager._connections.get(user_id, {})
+        for dev in list(conn_dict.values()):
+            try:
+                await dev.websocket.close(code=1008)
+            except Exception:
+                pass
+            dev_id = getattr(dev, "device_id", None)
+            if dev_id:
+                await remote_manager.disconnect(user_id, dev_id)
+
+        if user_id in remote_manager._connections:
+            del remote_manager._connections[user_id]
+        if user_id in remote_manager._last_playback_session:
+            del remote_manager._last_playback_session[user_id]
+    except Exception as e:
+        print(f"[Admin] Ошибка при сбросе Remote Connect для user {user_id}: {e}")
+
+    # 2. Удаление всех связанных записей: сессий и устройств пользователя
+    db.query(SessionToken).filter(SessionToken.user_id == user_id).delete(synchronize_session=False)
+    db.query(UserDevice).filter(UserDevice.user_id == user_id).delete(synchronize_session=False)
+
+    # 3. Удаление самого пользователя
+    db.delete(user)
+    db.commit()
+
+    return {"status": "success", "message": f"Пользователь «{username}» и вся связанная с ним информация удалены"}
 
 
 @router.post("/login")
@@ -243,10 +379,72 @@ def login_user(
 
 
 
+class UpdateProfileRequest(BaseModel):
+    current_password: str
+    new_username: Optional[str] = None
+    new_password: Optional[str] = None
+
+
 @router.get("/me")
 def get_current_user_profile(current_user: User = Depends(get_current_user)):
     """Проверка активности и профиля текущей сессии."""
     return {"id": current_user.id, "username": current_user.username, "is_admin": current_user.is_admin}
+
+
+@router.patch("/profile")
+@router.post("/profile")
+def update_user_profile(
+    payload: UpdateProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Изменение имени пользователя и/или пароля.
+    Требует обязательного ввода текущего пароля (защита от несанкционированного изменения).
+    """
+    # 1. Проверяем текущий пароль
+    if not verify_password(payload.current_password, current_user.salt, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Неверный текущий пароль")
+
+    updated = False
+
+    # 2. Обновление имени пользователя
+    if payload.new_username is not None:
+        new_uname = payload.new_username.strip()
+        if new_uname and new_uname != current_user.username:
+            new_uname = validate_username(new_uname)
+            # Проверяем уникальность
+            existing = db.query(User).filter(User.username == new_uname, User.id != current_user.id).first()
+            if existing:
+                raise HTTPException(status_code=400, detail="Пользователь с таким именем уже существует")
+            current_user.username = new_uname
+            updated = True
+
+    # 3. Обновление пароля
+    if payload.new_password is not None and payload.new_password.strip():
+        new_pwd = payload.new_password.strip()
+        if len(new_pwd) < 4:
+            raise HTTPException(status_code=400, detail="Новый пароль должен содержать минимум 4 символа")
+        salt, p_hash = hash_password(new_pwd)
+        current_user.salt = salt
+        current_user.password_hash = p_hash
+        updated = True
+
+    if not updated:
+        raise HTTPException(status_code=400, detail="Не указаны данные для изменения")
+
+    db.commit()
+    db.refresh(current_user)
+
+    return {
+        "status": "success",
+        "message": "Данные профиля успешно обновлены",
+        "user": {
+            "id": current_user.id,
+            "username": current_user.username,
+            "is_admin": current_user.is_admin
+        }
+    }
 
 
 @router.post("/logout")

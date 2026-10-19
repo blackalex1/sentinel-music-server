@@ -182,18 +182,206 @@ export function setupModals() {
     });
   }
 
-  // Настройки подключения к серверу
+  // Кнопка настроек в шапке переключает на полноценный экран настроек
   const btnSettings = document.getElementById('btnServerSettings');
-  const serverSettingsModal = document.getElementById('serverSettingsModal');
-  const serverSettingsForm = document.getElementById('serverSettingsForm');
-  const serverHostInput = document.getElementById('serverHostInput');
-
-  if (btnSettings && serverSettingsModal) {
+  if (btnSettings) {
     btnSettings.addEventListener('click', () => {
-      if (serverHostInput) {
-        serverHostInput.value = getServerHost();
+      switchView('settings');
+    });
+  }
+
+  // Переключение формы добавления пользователя администратором
+  const btnToggleAddUser = document.getElementById('btnToggleAddUserForm');
+  const btnCancelAddUser = document.getElementById('btnCancelAddUser');
+  const adminCreateForm = document.getElementById('adminCreateUserForm');
+  if (btnToggleAddUser && adminCreateForm) {
+    btnToggleAddUser.addEventListener('click', () => {
+      const isVisible = adminCreateForm.style.display !== 'none';
+      adminCreateForm.style.display = isVisible ? 'none' : 'block';
+      if (!isVisible) {
+        const uInput = document.getElementById('adminNewUsername');
+        if (uInput) uInput.focus();
       }
-      serverSettingsModal.classList.add('active');
+    });
+  }
+  if (btnCancelAddUser && adminCreateForm) {
+    btnCancelAddUser.addEventListener('click', () => {
+      adminCreateForm.style.display = 'none';
+    });
+  }
+
+  if (adminCreateForm) {
+    adminCreateForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const uInput = document.getElementById('adminNewUsername');
+      const pInput = document.getElementById('adminNewPassword');
+      const adminCheck = document.getElementById('adminNewIsAdmin');
+
+      const username = uInput ? uInput.value.trim() : '';
+      const password = pInput ? pInput.value.trim() : '';
+      const isAdmin = adminCheck ? adminCheck.checked : false;
+
+      if (!username || !password) return;
+
+      try {
+        const res = await apiFetch('/api/auth/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password, is_admin: isAdmin })
+        });
+
+        if (res.ok) {
+          showToast(`Пользователь «${username}» успешно создан!`, 'checkCircle');
+          if (uInput) uInput.value = '';
+          if (pInput) pInput.value = '';
+          if (adminCheck) adminCheck.checked = false;
+          adminCreateForm.style.display = 'none';
+          loadAdminUsers();
+        } else {
+          const err = await res.json();
+          showToast(err.detail || 'Ошибка создания пользователя', 'alert');
+        }
+      } catch (err) {
+        showToast('Не удалось связаться с сервером', 'alert');
+      }
+    });
+  }
+
+  async function loadAdminUsers() {
+    const listEl = document.getElementById('adminUsersList');
+    if (!listEl) return;
+
+    try {
+      const res = await apiFetch('/api/auth/users');
+      if (!res.ok) {
+        listEl.innerHTML = '<div style="font-size: 0.8rem; color: var(--text-muted); text-align: center;">Не удалось загрузить пользователей</div>';
+        return;
+      }
+      const users = await res.json();
+      if (!users || users.length === 0) {
+        listEl.innerHTML = '<div style="font-size: 0.8rem; color: var(--text-muted); text-align: center;">Пользователи отсутствуют</div>';
+        return;
+      }
+
+      listEl.innerHTML = users.map(u => {
+        const isCurrent = state.currentUser && state.currentUser.id === u.id;
+        const deleteBtn = isCurrent ? '' : `
+          <button type="button" class="btn-icon btn-delete-user" data-user-id="${u.id}" data-username="${escapeHtml(u.username)}" title="Удалить пользователя" style="color: var(--text-muted); padding: 2px 6px;">
+            ${icon('close', { size: 14 })}
+          </button>
+        `;
+        const adminBadge = u.is_admin ? '<span style="font-size: 10px; background: rgba(99, 102, 241, 0.2); color: #818cf8; padding: 1px 6px; border-radius: 4px; font-weight: 600;">ADMIN</span>' : '';
+
+        return `
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(255, 255, 255, 0.02); border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.04);">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 0.82rem; font-weight: 500; color: var(--text-primary);">${escapeHtml(u.username)}</span>
+              ${adminBadge}
+              ${isCurrent ? '<span style="font-size: 10px; color: var(--text-muted);">(вы)</span>' : ''}
+            </div>
+            ${deleteBtn}
+          </div>
+        `;
+      }).join('');
+
+      // Привязка удаления
+      listEl.querySelectorAll('.btn-delete-user').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const userId = btn.dataset.userId;
+          const uname = btn.dataset.username;
+          if (!confirm(`Удалить пользователя «${uname}»?`)) return;
+
+          try {
+            const delRes = await apiFetch(`/api/auth/users/${userId}`, { method: 'DELETE' });
+            if (delRes.ok) {
+              showToast(`Пользователь «${uname}» удален`, 'checkCircle');
+              loadAdminUsers();
+            } else {
+              const err = await delRes.json();
+              showToast(err.detail || 'Не удалось удалить пользователя', 'alert');
+            }
+          } catch (e) {
+            showToast('Ошибка при удалении', 'alert');
+          }
+        });
+      });
+    } catch (e) {
+      listEl.innerHTML = '<div style="font-size: 0.8rem; color: var(--text-muted); text-align: center;">Ошибка загрузки</div>';
+    }
+  }
+
+  // Управление формой изменения профиля (логина и пароля)
+  const btnToggleProfile = document.getElementById('btnToggleProfileForm');
+  const btnCancelProfile = document.getElementById('btnCancelProfileEdit');
+  const userProfileForm = document.getElementById('userProfileForm');
+  if (btnToggleProfile && userProfileForm) {
+    btnToggleProfile.addEventListener('click', () => {
+      const isVisible = userProfileForm.style.display !== 'none';
+      userProfileForm.style.display = isVisible ? 'none' : 'block';
+      if (!isVisible) {
+        const pCurrent = document.getElementById('profileCurrentPassword');
+        if (pCurrent) pCurrent.focus();
+      }
+    });
+  }
+  if (btnCancelProfile && userProfileForm) {
+    btnCancelProfile.addEventListener('click', () => {
+      userProfileForm.style.display = 'none';
+    });
+  }
+
+  if (userProfileForm) {
+    userProfileForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const currentPwdInput = document.getElementById('profileCurrentPassword');
+      const newUnameInput = document.getElementById('profileNewUsername');
+      const newPwdInput = document.getElementById('profileNewPassword');
+
+      const currentPassword = currentPwdInput ? currentPwdInput.value.trim() : '';
+      const newUsername = newUnameInput ? newUnameInput.value.trim() : '';
+      const newPassword = newPwdInput ? newPwdInput.value.trim() : '';
+
+      if (!currentPassword) {
+        showToast('Введите текущий пароль для подтверждения', 'alert');
+        return;
+      }
+
+      if (!newUsername && !newPassword) {
+        showToast('Укажите новый логин или новый пароль', 'alert');
+        return;
+      }
+
+      const payload = { current_password: currentPassword };
+      if (newUsername) payload.new_username = newUsername;
+      if (newPassword) payload.new_password = newPassword;
+
+      try {
+        const res = await apiFetch('/api/auth/profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          showToast('Данные профиля успешно обновлены!', 'checkCircle');
+          if (currentPwdInput) currentPwdInput.value = '';
+          if (newUnameInput) newUnameInput.value = '';
+          if (newPwdInput) newPwdInput.value = '';
+          userProfileForm.style.display = 'none';
+
+          if (data.user) {
+            updateState('currentUser', data.user);
+            updateUserInfoUI(data.user);
+          }
+        } else {
+          const err = await res.json();
+          showToast(err.detail || 'Не удалось обновить профиль', 'alert');
+        }
+      } catch (err) {
+        showToast('Ошибка при связи с сервером', 'alert');
+      }
     });
   }
 

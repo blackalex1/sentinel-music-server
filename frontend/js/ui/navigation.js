@@ -20,7 +20,7 @@ export function switchView(viewName, shouldReload = true) {
   });
 
   // Скрываем все страницы контента и показываем целевую
-  const views = ['viewMain', 'viewStream', 'viewTracks', 'viewPlaylists', 'viewDuplicates'];
+  const views = ['viewMain', 'viewStream', 'viewTracks', 'viewPlaylists', 'viewDuplicates', 'viewBatchImport', 'viewSettings'];
   views.forEach(v => {
     const el = document.getElementById(v);
     if (el) el.style.setProperty('display', 'none', 'important');
@@ -31,7 +31,9 @@ export function switchView(viewName, shouldReload = true) {
     stream: 'viewStream',
     tracks: 'viewTracks',
     playlists: 'viewPlaylists',
-    duplicates: 'viewDuplicates'
+    duplicates: 'viewDuplicates',
+    batchImport: 'viewBatchImport',
+    settings: 'viewSettings'
   }[viewName];
 
   if (activeTarget) {
@@ -77,6 +79,8 @@ export function switchView(viewName, shouldReload = true) {
     if (shouldReload) {
       loadDuplicates();
     }
+  } else if (viewName === 'settings') {
+    window.dispatchEvent(new CustomEvent('settings:opened'));
   }
 }
 

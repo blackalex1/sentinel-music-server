@@ -172,4 +172,12 @@ if os.path.exists(frontend_dir):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=True)
+    ssl_cert = os.path.join(settings.DATA_DIR, "cert.pem")
+    ssl_key = os.path.join(settings.DATA_DIR, "key.pem")
+    ssl_opts = {}
+    if os.path.exists(ssl_cert) and os.path.exists(ssl_key):
+        print(f"[Server] Обнаружен SSL-сертификат: запуск по HTTPS на порту {settings.PORT}")
+        ssl_opts["ssl_certfile"] = ssl_cert
+        ssl_opts["ssl_keyfile"] = ssl_key
+
+    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=True, **ssl_opts)

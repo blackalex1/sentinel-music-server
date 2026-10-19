@@ -249,8 +249,8 @@ def test_sql_injection_in_auth_endpoints(client, db_session):
             "username": payload,
             "password": "valid_password_123"
         })
-        # Должен либо безопасно зарегистрировать (строка экранирована), либо вернуть 400
-        assert r_reg.status_code in (200, 400, 422)
+        # Должен либо безопасно зарегистрировать (строка экранирована), либо вернуть 400/403/422
+        assert r_reg.status_code in (200, 400, 403, 422)
 
     # Проверяем целостность таблицы пользователей
     from database.models import User

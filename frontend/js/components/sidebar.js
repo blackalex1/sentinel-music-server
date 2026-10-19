@@ -36,6 +36,10 @@ export function renderSidebar() {
           <span>Дубликаты</span>
           <span class="nav-badge" id="duplicatesCountBadge" style="display: none;">0</span>
         </a>
+        <a class="nav-item" data-view="settings" id="navItemSettings" title="Настройки сервера и профиля">
+          <span class="nav-icon">${icon('settings', { size: 18 })}</span>
+          <span>Настройки</span>
+        </a>
       </nav>
 
       <div class="sidebar-divider"></div>

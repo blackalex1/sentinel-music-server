@@ -64,6 +64,8 @@ import { initDuplicatesUI, loadDuplicates } from './ui/duplicates.js';
 import { showConfirm, showAlert, showPrompt } from './ui/notifications.js';
 import { initExpandedPlayer, toggleExpandedPlayer } from './ui/expandedPlayer.js';
 import { setupEqualizerUI, openEqualizerModal, closeEqualizerModal, toggleEqualizerModal } from './ui/equalizer.js';
+import { initSettingsView } from './ui/settings.js';
+
 
 // Публичный ре-экспорт всех компонентов для 100% обратной совместимости
 export {
@@ -134,6 +136,7 @@ export function initUI() {
   initMoodCollectionsUI();
   initPlaylistsUI();
   initLibraryMoodChips();
+  initSettingsView();
 
   // Настройка обратных вызовов для модальных окон
   setModalsCallbacks({

@@ -70,3 +70,39 @@ def test_system_watcher_controls(client, auth_headers, monkeypatch):
     res_stop = client.post("/api/watcher/stop", headers=auth_headers)
     assert res_stop.status_code == 200
     assert res_stop.json()["status"] == "stopped"
+
+
+def test_ssl_status(client, auth_headers):
+    """Проверяет получение статуса SSL-сертификата администратором."""
+    res = client.get("/api/ssl/status", headers=auth_headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert "installed" in data
+    assert "cert_path" in data
+    assert "key_path" in data
+
+    # Проверка алиаса /api/system/ssl/status
+    res_alias = client.get("/api/system/ssl/status", headers=auth_headers)
+    assert res_alias.status_code == 200
+    assert res_alias.json()["installed"] == data["installed"]
+
+
+def test_ssl_generate_self_signed(client, auth_headers, tmp_path, monkeypatch):
+    """Проверяет генерацию самоподписанного сертификата для домена и IP."""
+    import core.ssl.utils as ssl_utils
+    monkeypatch.setattr(ssl_utils, "SSL_CERT_PATH", tmp_path / "cert.pem")
+    monkeypatch.setattr(ssl_utils, "SSL_KEY_PATH", tmp_path / "key.pem")
+
+    res = client.post(
+        "/api/system/ssl/generate",
+        json={"is_self_signed": True, "domain": "192.168.1.100"},
+        headers=auth_headers
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert (tmp_path / "cert.pem").exists()
+    assert (tmp_path / "key.pem").exists()
+
+
+

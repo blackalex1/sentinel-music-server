@@ -144,7 +144,7 @@ class SessionToken(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     token = Column(String, unique=True, index=True, nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     device_name = Column(String, default="Unknown Device")
     created_at = Column(DateTime, default=utc_now)
     expires_at = Column(DateTime, nullable=True)
@@ -159,7 +159,7 @@ class UserDevice(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     device_id = Column(String, index=True, nullable=False)
     name = Column(String, default="Компьютер")
     device_type = Column(String, default="player")  # "player", "remote", "hybrid"

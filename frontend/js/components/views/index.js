@@ -7,6 +7,7 @@ import { renderStreamView } from './streamView.js';
 import { renderTracksView } from './tracksView.js';
 import { renderPlaylistsView } from './playlistsView.js';
 import { renderDuplicatesView } from './duplicatesView.js';
+import { renderSettingsView } from './settingsView.js';
 
 export function renderContentViews() {
   return `
@@ -16,6 +17,7 @@ export function renderContentViews() {
       ${renderTracksView()}
       ${renderPlaylistsView()}
       ${renderDuplicatesView()}
+      ${renderSettingsView()}
     </div>
   `;
 }
