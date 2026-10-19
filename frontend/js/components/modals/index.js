@@ -5,7 +5,6 @@
 import { renderAuthModal } from './authModal.js';
 import { renderPlaylistModal } from './playlistModal.js';
 import { renderAddToPlaylistModal } from './addToPlaylistModal.js';
-import { renderServerSettingsModal } from './serverSettingsModal.js';
 import { renderTrackVersionsModal } from './trackVersionsModal.js';
 import { renderDeleteTrackModal } from './deleteTrackModal.js';
 import { renderUploadTracksModal } from './uploadTracksModal.js';
@@ -18,7 +17,6 @@ export function renderModals() {
       ${renderAuthModal()}
       ${renderPlaylistModal()}
       ${renderAddToPlaylistModal()}
-      ${renderServerSettingsModal()}
       ${renderTrackVersionsModal()}
       ${renderDeleteTrackModal()}
       ${renderUploadTracksModal()}
