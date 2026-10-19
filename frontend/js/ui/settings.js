@@ -11,6 +11,7 @@ import { state, updateState } from '../state.js';
 import { apiFetch } from '../api.js';
 import { getServerHost, setServerHost } from '../config.js';
 import { showToast } from './toast.js';
+import { showConfirm } from './notifications.js';
 import { icon } from '../icons.js';
 import { updateUserInfoUI } from './playerControls.js';
 import { openQrModal } from './modals.js';
@@ -238,7 +239,16 @@ async function loadAdminUsersList() {
         e.stopPropagation();
         const userId = btn.dataset.userId;
         const uname = btn.dataset.username;
-        if (!confirm(`Вы действительно хотите удалить пользователя «${uname}» и все его данные?`)) return;
+        const ok = await showConfirm({
+          title: 'Удаление пользователя',
+          subtitle: `Пользователь: ${uname}`,
+          message: `Вы действительно хотите удалить учетную запись «${uname}»? Все персональные данные, история и настройки будут безвозвратно удалены.`,
+          confirmText: 'Удалить',
+          cancelText: 'Отмена',
+          type: 'danger',
+          icon: 'trash'
+        });
+        if (!ok) return;
 
         try {
           const delRes = await apiFetch(`/api/auth/users/${userId}`, { method: 'DELETE' });
