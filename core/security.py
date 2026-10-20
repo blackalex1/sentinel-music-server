@@ -78,6 +78,9 @@ def decrypt_encrypted_token(enc_token_str: str) -> Optional[str]:
     """
     if not enc_token_str or not enc_token_str.startswith("enc:v1:"):
         return None
+    # Защита от выделения памяти/CPU DoS при отправке аномально больших строк
+    if len(enc_token_str) > 1024:
+        return None
     raw_b64 = enc_token_str[len("enc:v1:"):]
     missing_padding = len(raw_b64) % 4
     if missing_padding:
@@ -116,7 +119,7 @@ def get_current_user(
     elif token:
         extracted_token = token.strip()
 
-    if not extracted_token or "\x00" in extracted_token:
+    if not extracted_token or "\x00" in extracted_token or len(extracted_token) > 2048:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Необходима авторизация (отсутствует токен доступа)",

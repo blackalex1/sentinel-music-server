@@ -597,11 +597,15 @@ def get_qr_image(
             raise HTTPException(status_code=401, detail="Недействительный токен сессии")
 
         server_url = host.rstrip("/") if host else f"http://{get_local_ip()}:8000"
+        enc_token = create_encrypted_token(
+            session_token=session.token,
+            username=session.user.username,
+            user_id=session.user.id
+        )
         payload_dict = {
             "url": server_url,
-            "token": session.token,
-            "username": session.user.username,
-            "is_admin": session.user.is_admin
+            "token": enc_token,
+            "username": session.user.username
         }
         payload_str = json.dumps(payload_dict, separators=(",", ":"))
 

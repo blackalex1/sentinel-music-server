@@ -389,7 +389,7 @@ async def remote_websocket_endpoint(
 
     # Аутентификация пользователя по сессионному токену
     user_id: Optional[int] = None
-    if "\x00" not in token:
+    if "\x00" not in token and len(token) <= 2048:
         lookup_token = token.strip()
         if lookup_token.startswith("enc:v1:"):
             decrypted = decrypt_encrypted_token(lookup_token)
