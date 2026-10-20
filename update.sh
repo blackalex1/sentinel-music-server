@@ -8,8 +8,68 @@ echo "=========================================="
 echo " 🚀 Обновление Sentinel Music Server"
 echo "=========================================="
 
-echo ">> [1/3] 📥 Получение обновлений из репозитория..."
-git pull origin main
+run_with_timeout() {
+    local seconds="$1"
+    shift
+    if command -v timeout &>/dev/null; then
+        timeout "$seconds" "$@"
+    else
+        "$@"
+    fi
+}
+
+pull_updates() {
+    local branch="${1:-main}"
+    local origin_url
+    origin_url=$(git remote get-url origin 2>/dev/null || echo "https://github.com/blackalex1/sentinel-music-server.git")
+
+    # Извлекаем путь owner/repo (работает и для HTTPS, и для SSH)
+    local repo_path="blackalex1/sentinel-music-server"
+    if [[ "$origin_url" =~ github\.com[:/]([^/]+/[^/.]+)(\.git)? ]]; then
+        repo_path="${BASH_REMATCH[1]}"
+    fi
+
+    echo ">> [1/3] 📥 Проверка доступности репозитория (ветка $branch)..."
+
+    # 1. Проверяем доступность официального GitHub (таймаут 4 сек)
+    if run_with_timeout 4 git ls-remote "$origin_url" HEAD &>/dev/null; then
+        echo "✅ Связь с GitHub стабильна. Скачивание обновлений..."
+        git pull origin "$branch"
+        return 0
+    fi
+
+    echo "⚠️ Официальный GitHub недоступен (таймаут или сетевая блокировка)."
+    echo "🔄 Подключение через резервные зеркала GitHub..."
+
+    # Проверенные высокоскоростные зеркала GitHub
+    local mirrors=(
+        "https://ghfast.top/https://github.com/${repo_path}.git"
+        "https://gh-proxy.com/https://github.com/${repo_path}.git"
+        "https://githubproxy.cc/https://github.com/${repo_path}.git"
+    )
+
+    local success=0
+    for mirror in "${mirrors[@]}"; do
+        local host
+        host=$(echo "$mirror" | sed -E 's#https?://([^/]+)/.*#\1#')
+        echo "   -> Проверка зеркала: $host ..."
+        if run_with_timeout 4 git ls-remote "$mirror" HEAD &>/dev/null; then
+            echo "   ✅ Зеркало $host доступно! Загрузка обновлений..."
+            if git pull "$mirror" "$branch"; then
+                success=1
+                break
+            fi
+        fi
+    done
+
+    if [ "$success" -ne 1 ]; then
+        echo "❌ Ошибка: ни официальный GitHub, ни резервные зеркала не ответили на запрос."
+        echo "Пожалуйста, проверьте интернет-соединение или настройки DNS."
+        exit 1
+    fi
+}
+
+pull_updates "main"
 
 echo ">> [2/3] 🐳 Применение изменений в Docker..."
 if command -v docker &> /dev/null; then
