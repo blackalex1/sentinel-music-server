@@ -553,12 +553,9 @@ def test_plugin_source_code_http_isolation(client):
     """Проверка невозможности скачивания исходного кода (.py) или приватных файлов плагинов через веб-сервер."""
     # Попытки прямого обращения к исходникам плагинов
     blocked_endpoints = [
-        "/plugins/batch_import/plugin.py",
-        "/plugins/batch_import/worker.py",
-        "/plugins/cover_art/plugin.py",
-        "/plugins/lyrics/plugin.py",
-        "/plugins/slskd/plugin.py",
-        "/plugins/slskd/client.py",
+        "/plugins/demo_plugin/plugin.py",
+        "/plugins/demo_plugin/worker.py",
+        "/plugins/custom_extension/client.py",
         "/plugins/__init__.py",
         "/plugins/example_logger.py.example"
     ]

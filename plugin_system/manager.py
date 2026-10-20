@@ -377,8 +377,8 @@ class PluginManager:
         target_plugin = candidate.get("plugin_name", "")
         target_source = candidate.get("source", "").lower()
 
-        # Фоновые и P2P источники (Soulseek, torrent, p2p) не поддерживают прямое потоковое превью
-        if any(kw in target_source for kw in ("p2p", "slskd", "torrent", "soulseek")):
+        # Фоновые и P2P источники не поддерживают прямое потоковое превью
+        if any(kw in target_source for kw in ("p2p", "torrent", "peer")):
             return False
 
         for p in self.plugins:

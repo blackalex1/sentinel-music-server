@@ -57,7 +57,7 @@ export function renderStreamView() {
           <span class="stream-warning-icon">${icon('alert', { size: 20 })}</span>
           <div class="stream-warning-content">
             <span class="stream-warning-title">Плагины для скачивания музыки не установлены</span>
-            <span class="stream-warning-text">Новые треки будут воспроизводиться в 30-секундном демо-режиме (Deezer Previews). Для автоматического сохранения полных треков включите плагин скачивания (например, SLSKD).</span>
+            <span class="stream-warning-text">Новые треки будут воспроизводиться в 30-секундном демо-режиме (Deezer Previews). Для автоматического сохранения полных треков включите плагин скачивания в настройках сервера.</span>
           </div>
         </div>
 
