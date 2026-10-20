@@ -335,3 +335,8 @@ export const Sentinel = {
 
 // Экспортируем также глобально на window для свободного использования любыми динамическими скриптами
 window.Sentinel = Sentinel;
+window.apiFetch = apiFetch;
+window.showToast = showToast;
+window.showConfirm = showConfirm;
+window.showAlert = showAlert;
+window.switchView = switchView;
