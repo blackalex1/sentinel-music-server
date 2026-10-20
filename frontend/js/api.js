@@ -2,7 +2,11 @@
  * Модуль клиентских REST API запросов.
  */
 
-import { API_BASE, getAuthToken, clearAuthToken } from './config.js';
+import { API_BASE, getAuthToken, clearAuthToken, getServerHost } from './config.js';
+
+export function getApiBase() {
+  return (typeof getServerHost === 'function' ? getServerHost() : null) || API_BASE;
+}
 
 export async function apiFetch(path, options = {}) {
   const token = getAuthToken();
@@ -12,7 +16,8 @@ export async function apiFetch(path, options = {}) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
+  const base = getApiBase();
+  const url = path.startsWith('http') ? path : `${base}${path}`;
   const response = await fetch(url, { ...options, headers });
 
   if (response.status === 401) {
@@ -25,12 +30,14 @@ export async function apiFetch(path, options = {}) {
 }
 
 export async function checkAuthStatus() {
-  const res = await fetch(`${API_BASE}/api/auth/status`);
+  const base = getApiBase();
+  const res = await fetch(`${base}/api/auth/status`);
   return res.json();
 }
 
 export async function apiLogin(username, password) {
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
+  const base = getApiBase();
+  const res = await fetch(`${base}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password, device_name: 'Web / Sentinel Music' })
@@ -39,7 +46,8 @@ export async function apiLogin(username, password) {
 }
 
 export async function apiRegister(username, password) {
-  const res = await fetch(`${API_BASE}/api/auth/register`, {
+  const base = getApiBase();
+  const res = await fetch(`${base}/api/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password })
@@ -307,7 +315,7 @@ export function uploadTrackFiles(fileList, onProgress = null) {
 
     const xhr = new XMLHttpRequest();
     const token = getAuthToken();
-    const url = `${API_BASE}/api/tracks/upload`;
+    const url = `${getApiBase()}/api/tracks/upload`;
 
     xhr.open('POST', url, true);
     if (token) {

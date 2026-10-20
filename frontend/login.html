@@ -368,7 +368,7 @@
           submitBtnText.textContent = originalText;
         }
       } catch (err) {
-        showError(`Не удалось соединиться с сервером (${serverHost}). Убедитесь, что сервер запущен и доступен.`);
+        showError(`Не удалось соединиться с сервером (${serverHost}). Убедитесь, что сервер запущен, доступен по сети и разрешает подключения (CORS).`);
         if (serverHostForm) {
           serverHostForm.style.display = 'flex';
         }
@@ -516,7 +516,7 @@
         }
       } catch (err) {
         const currentHost = getServerHost();
-        showError(`Не удалось соединиться с сервером (${currentHost}). Убедитесь, что сервер запущен, или укажите другой адрес.`);
+        showError(`Не удалось соединиться с сервером (${currentHost}). Убедитесь, что сервер запущен, доступен по сети и разрешает подключения (CORS).`);
         if (serverHostForm) {
           serverHostForm.style.display = 'flex';
         }

@@ -570,3 +570,27 @@ def test_plugin_source_code_http_isolation(client):
 
 
 
+
+
+def test_tauri_desktop_cors_allowed(client):
+    """Проверка доступности CORS для десктопного клиента на Windows (http://tauri.localhost), macOS/Linux (tauri://localhost) и Android (https://tauri.localhost)."""
+    origins = [
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+        "tauri://localhost",
+        "http://localhost:8000",
+        "http://192.168.1.100:8000",
+        "http://10.0.0.5:8000",
+        "http://172.16.0.10:8000"
+    ]
+    for origin in origins:
+        res = client.options(
+            "/api/auth/me",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization"
+            }
+        )
+        assert res.status_code == 200, f"Origin {origin} must be allowed by CORS, got status {res.status_code}"
+        assert res.headers.get("access-control-allow-origin") == origin

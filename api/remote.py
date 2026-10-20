@@ -379,7 +379,7 @@ async def remote_websocket_endpoint(
         import re
         from main import cors_origins
         is_allowed = (origin in cors_origins) or bool(
-            re.match(r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$", origin)
+            re.match(r"^(https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|([a-z0-9-]+\.)?localhost)(:\d+)?|tauri://localhost)$", origin)
         )
         if not is_allowed:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)

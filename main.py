@@ -117,24 +117,28 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Безопасная настройка CORS для веб-клиента, локальной сети (LAN), мобильного приложения и Tauri Desktop
+# Безопасная настройка CORS для клиентов Sentinel Music (Tauri Desktop на Windows/macOS/Linux, Web и локальный доступ)
+DEFAULT_CLIENT_ORIGINS = [
+    "http://localhost",
+    "http://localhost:8000",
+    "http://127.0.0.1",
+    "http://127.0.0.1:8000",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "tauri://localhost"
+]
+
 allowed_origins_raw = getattr(settings, "ALLOWED_ORIGINS", "") or os.getenv("ALLOWED_ORIGINS", "")
 if allowed_origins_raw.strip():
-    cors_origins = [o.strip() for o in allowed_origins_raw.split(",") if o.strip()]
+    user_origins = [o.strip() for o in allowed_origins_raw.split(",") if o.strip()]
+    cors_origins = list(dict.fromkeys(DEFAULT_CLIENT_ORIGINS + user_origins))
 else:
-    cors_origins = [
-        "http://localhost",
-        "http://localhost:8000",
-        "http://127.0.0.1",
-        "http://127.0.0.1:8000",
-        "tauri://localhost",
-        "https://tauri.localhost"
-    ]
+    cors_origins = DEFAULT_CLIENT_ORIGINS
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$",
+    allow_origin_regex=r"^(https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|([a-z0-9-]+\.)?localhost)(:\d+)?|tauri://localhost)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
