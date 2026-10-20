@@ -508,6 +508,60 @@ def test_login_timing_protection_and_rate_limiting(client):
     clear_failed_logins()
 
 
+def test_plugin_endpoints_authentication_and_authorization(client, db_session, auth_headers, sample_track):
+    """Проверка обязательной аутентификации и разграничения прав доступа на эндпоинтах плагинов."""
+    from database.models import User, SessionToken
+    from core.security import hash_password, generate_session_token
+
+    # 1. Попытка неавторизованного доступа к эндпоинтам плагинов -> 401 Unauthorized
+    assert client.get("/api/batch-import/status").status_code == 401
+    assert client.post("/api/batch-import/clear").status_code == 401
+    assert client.post("/api/batch-import/upload").status_code == 401
+    assert client.get(f"/api/lyrics/{sample_track.id}").status_code == 401
+    assert client.post(f"/api/lyrics/{sample_track.id}/refresh").status_code == 401
+    assert client.post(f"/api/covers/{sample_track.id}/refresh").status_code == 401
+    assert client.post("/api/ingest/request?artist=A&title=B").status_code == 401
+    assert client.post("/api/covers/backfill").status_code == 401
+
+    # 2. Не-администраторский пользователь (is_admin=False)
+    salt, p_hash = hash_password("pass123")
+    regular_user = User(username="regular_listener", password_hash=p_hash, salt=salt, is_admin=False)
+    db_session.add(regular_user)
+    db_session.commit()
+    token = generate_session_token()
+    db_session.add(SessionToken(token=token, user_id=regular_user.id, device_name="Phone"))
+    db_session.commit()
+    user_headers = {"Authorization": f"Bearer {token}"}
+
+    # Не-администратор НЕ может вызывать административные эндпоинты плагинов -> 403 Forbidden
+    assert client.post("/api/ingest/request?artist=A&title=B", headers=user_headers).status_code == 403
+    assert client.post("/api/covers/backfill", headers=user_headers).status_code == 403
+    assert client.post(f"/api/tracks/{sample_track.id}/replace", json={"candidate": {"title": "X"}}, headers=user_headers).status_code == 403
+    assert client.post("/api/tracks/candidates/download", json={"candidate": {"title": "X"}}, headers=user_headers).status_code == 403
+
+    # При этом администратор успешно проходит авторизацию
+    res_admin = client.get("/api/batch-import/status", headers=auth_headers)
+    assert res_admin.status_code == 200
+
+
+def test_plugin_source_code_http_isolation(client):
+    """Проверка невозможности скачивания исходного кода (.py) или приватных файлов плагинов через веб-сервер."""
+    # Попытки прямого обращения к исходникам плагинов
+    blocked_endpoints = [
+        "/plugins/batch_import/plugin.py",
+        "/plugins/batch_import/worker.py",
+        "/plugins/cover_art/plugin.py",
+        "/plugins/lyrics/plugin.py",
+        "/plugins/slskd/plugin.py",
+        "/plugins/slskd/client.py",
+        "/plugins/__init__.py",
+        "/plugins/example_logger.py.example"
+    ]
+    for ep in blocked_endpoints:
+        res = client.get(ep)
+        assert res.status_code == 404
+
+
 
 
 
