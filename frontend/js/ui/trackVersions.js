@@ -9,7 +9,7 @@ function updateDynamicFilterChips(candidates) {
     const chip = document.createElement('button');
     chip.className = 'version-filter-chip';
     chip.dataset.filter = `source:${src}`;
-    const label = src.toLowerCase() === 'p2p' ? 'P2P' : (src.charAt(0).toUpperCase() + src.slice(1));
+    const label = src.charAt(0).toUpperCase() + src.slice(1);
     chip.textContent = label;
     chip.addEventListener('click', () => {
       document.querySelectorAll('.version-filter-chip').forEach(c => c.classList.remove('active'));

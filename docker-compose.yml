@@ -37,8 +37,6 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-music_admin}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-music_db}
       - WATCHDOG_ENABLED=${WATCHDOG_ENABLED:-true}
       - WATCHDOG_DEBOUNCE_SECONDS=${WATCHDOG_DEBOUNCE_SECONDS:-2.0}
-      - EXT_P2P_API_URL=${EXT_P2P_API_URL:-http://host.docker.internal:5030/api/v0}
-      - EXT_P2P_API_KEY=${EXT_P2P_API_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

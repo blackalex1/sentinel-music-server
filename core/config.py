@@ -32,10 +32,6 @@ class Settings(BaseSettings):
     # Автономный буфер Потока (Discovery Buffer)
     STREAM_BUFFER_SIZE: int = int(os.getenv("STREAM_BUFFER_SIZE", "10"))
 
-    # Настройки интеграций (опционально для плагинов)
-    EXT_P2P_API_URL: str = os.getenv("EXT_P2P_API_URL", "http://localhost:5030/api/v0")
-    EXT_P2P_API_KEY: str = os.getenv("EXT_P2P_API_KEY", "")
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

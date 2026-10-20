@@ -82,26 +82,35 @@ def test_list_plugins_endpoint(client, auth_headers):
     assert "enabled" in plugins[0]
     assert "has_ui" in plugins[0]
 
-    # Проверяем наличие self-contained плагина search_extension с UI
-    hs_plugin = next((p for p in plugins if p["name"] == "search_extension"), None)
-    assert hs_plugin is not None
-    assert hs_plugin["has_ui"] is True
-    assert hs_plugin["ui_entry"] == "/plugins/search_extension/index.js"
-    assert hs_plugin["ui_styles"] == "/plugins/search_extension/styles.css"
+    # Проверяем контракт полей у плагинов с UI (при их наличии)
+    ui_plugins = [p for p in plugins if p.get("has_ui")]
+    for p in ui_plugins:
+        assert "ui_entry" in p
+        assert p["ui_entry"].startswith("/plugins/")
 
 
-def test_plugin_ui_assets_mounting(client):
+def test_plugin_ui_assets_mounting(client, tmp_path):
     """Проверяет корректность раздачи изолированных статических ассетов плагина через HTTP."""
-    res_js = client.get("/plugins/search_extension/index.js")
+    from fastapi.staticfiles import StaticFiles
+    from main import app
+
+    mock_ui_dir = tmp_path / "mock_ui"
+    mock_ui_dir.mkdir()
+    (mock_ui_dir / "index.js").write_text("export function init() {}", encoding="utf-8")
+    (mock_ui_dir / "styles.css").write_text(".mock-tab {}", encoding="utf-8")
+    (mock_ui_dir / "plugin.py").write_text("# private code", encoding="utf-8")
+
+    app.mount("/plugins/test_mock_ui", StaticFiles(directory=str(mock_ui_dir)))
+
+    res_js = client.get("/plugins/test_mock_ui/index.js")
     assert res_js.status_code == 200
     assert "init" in res_js.text
 
-    res_css = client.get("/plugins/search_extension/styles.css")
+    res_css = client.get("/plugins/test_mock_ui/styles.css")
     assert res_css.status_code == 200
-    assert "hybrid-search-tabs" in res_css.text
 
     # Проверяем, что исходный код Python (.py) изолирован и недоступен
-    res_py = client.get("/plugins/search_extension/plugin.py")
+    res_py = client.get("/plugins/test_mock_ui/plugin.py")
     assert res_py.status_code == 404
 
 
@@ -121,18 +130,19 @@ async def test_candidate_preview_url_delegation():
     assert url == "https://mock-stream.example.com/audio.mp3"
 
 
-def test_candidate_preview_endpoint_rejects_p2p(client, auth_headers):
+def test_candidate_preview_endpoint_rejects_unsupported(client, auth_headers):
     from api.candidates import _register_candidates
     _register_candidates([{
-        "candidate_id": "p2p_user_song.mp3",
-        "source": "p2p",
-        "title": "Test P2P",
+        "candidate_id": "unsupported_song.mp3",
+        "source": "mock_no_preview",
+        "can_preview": False,
+        "title": "Test No Preview",
         "artist": "Test Artist"
     }])
 
-    res = client.get("/api/tracks/candidates/preview?candidate_id=p2p_user_song.mp3", headers=auth_headers)
+    res = client.get("/api/tracks/candidates/preview?candidate_id=unsupported_song.mp3", headers=auth_headers)
     assert res.status_code == 400
-    assert "P2P" in res.json()["detail"]
+    assert "не поддерживается" in res.json()["detail"]
 
 
 def test_candidate_preview_endpoint_streaming(client, auth_headers, monkeypatch):
@@ -140,12 +150,12 @@ def test_candidate_preview_endpoint_streaming(client, auth_headers, monkeypatch)
     from api.candidates import _register_candidates
 
     _register_candidates([{
-        "candidate_id": "source_a_99999",
-        "source": "source_a",
-        "plugin_name": "SourceAIngestionPlugin",
-        "title": "SourceA Track",
-        "artist": "SourceA Artist",
-        "dl_url": "https://rus.source_atop.com/download/99999"
+        "candidate_id": "mock_preview_99999",
+        "source": "mock_provider",
+        "plugin_name": "MockProviderPlugin",
+        "title": "Mock Track",
+        "artist": "Mock Artist",
+        "dl_url": "https://example.com/download/99999"
     }])
 
     # Mock requests.get to return a dummy streaming response
@@ -162,7 +172,7 @@ def test_candidate_preview_endpoint_streaming(client, auth_headers, monkeypatch)
     monkeypatch.setattr(requests, "get", lambda *args, **kwargs: mock_resp)
 
     res = client.get(
-        "/api/tracks/candidates/preview?candidate_id=source_a_99999",
+        "/api/tracks/candidates/preview?candidate_id=mock_preview_99999",
         headers={**auth_headers, "Range": "bytes=0-1023"}
     )
     assert res.status_code == 206

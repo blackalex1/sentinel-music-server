@@ -218,7 +218,7 @@ class PluginManager:
 
         async def _query_plugin(p: BasePlugin) -> List[Dict[str, Any]]:
             try:
-                # Ограничиваем время ожидания одного плагина до 7.5 сек (дает P2P сети P2P время ответить)
+                # Ограничиваем время ожидания одного плагина до 7.5 сек (дает внешним источникам и P2P сетям время ответить)
                 res = await asyncio.wait_for(p.search_candidates(artist, title, limit=effective_limit), timeout=7.5)
                 if res and isinstance(res, list):
                     for r in res:

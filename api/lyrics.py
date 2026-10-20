@@ -19,7 +19,7 @@ async def get_track_lyrics(
     db: Session = Depends(get_db)
 ):
     """
-    Получает синхронизированный караоке-текст песни через систему плагинов (LyricPlugin).
+    Получает синхронизированный караоке-текст песни через систему плагинов .
     Каскадный поиск: БД -> .lrc файл -> Встроенные теги -> LRCLIB -> NetEase -> Региональный каталог -> Genius.
     """
     track = db.query(Track).filter(Track.id == track_id).first()

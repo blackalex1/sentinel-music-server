@@ -70,15 +70,11 @@ _tracks_mod.SessionLocal = TestingSessionLocal
 def mock_plugin_network_and_ingestion(monkeypatch):
     """
     Глобальная изоляция тестовой среды:
-    Предотвращает реальные сетевые запросы и загрузку треков в P2P/фонотеку во время тестов.
+    Предотвращает реальные сетевые запросы и загрузку треков в фонотеку во время тестов.
     """
     from unittest.mock import AsyncMock
     from plugin_system.manager import plugin_manager
-    try:
-        import plugins.cover_art.plugin as cap_module
-        import plugins.cover_art.online as cao_module
-    except ImportError:
-        pass
+
 
     monkeypatch.setattr(plugin_manager, "request_track_import", AsyncMock(return_value=True))
     monkeypatch.setattr(plugin_manager, "download_selected_candidate", AsyncMock(return_value=True))
@@ -143,18 +139,20 @@ def client(db_session, tmp_path):
     app.dependency_overrides[get_db] = override_get_db
     with TestClient(app) as test_client:
         from plugin_system.manager import plugin_manager
-        plugin = plugin_manager.get_plugin("CoverPlugin")
-        orig_cache = None
-        if plugin:
-            orig_cache = getattr(plugin, "cache_dir", None)
-            test_cache = str(tmp_path / "covers_cache")
-            os.makedirs(test_cache, exist_ok=True)
-            plugin.cache_dir = test_cache
+        modified_plugins = []
+        for plugin in getattr(plugin_manager, "plugins", []):
+            if hasattr(plugin, "cache_dir"):
+                orig_cache = getattr(plugin, "cache_dir", None)
+                test_cache = str(tmp_path / "covers_cache")
+                os.makedirs(test_cache, exist_ok=True)
+                plugin.cache_dir = test_cache
+                modified_plugins.append((plugin, orig_cache))
         try:
             yield test_client
         finally:
-            if plugin and orig_cache is not None:
-                plugin.cache_dir = orig_cache
+            for plugin, orig_cache in modified_plugins:
+                if orig_cache is not None:
+                    plugin.cache_dir = orig_cache
     app.dependency_overrides.clear()
 
 

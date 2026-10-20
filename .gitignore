@@ -15,8 +15,6 @@ plugins/*
 !plugins/.gitkeep
 !plugins/*.example
 !plugins/__init__.py
-*p2p*
-*p2p*
 *downloader*
 *.private.*
 *.secret.*

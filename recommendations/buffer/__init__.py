@@ -4,7 +4,7 @@ Modular architecture for Discovery / Stream buffer management:
 - constants: configuration, paths, retention TTL, safe console output.
 - history: disk persistence, atomic writes, legacy migration.
 - cleaner: periodic TTL expiration, database sync, backfill likes.
-- refiller: background buffer replenishment and Lossless P2P upgrades.
+- refiller: background buffer replenishment and HQ lossless upgrades.
 - manager: DiscoveryBufferManager coordinator and singleton instance.
 """
 

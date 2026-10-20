@@ -64,9 +64,11 @@ def test_covers_refresh(client, sample_track, auth_headers):
 
 
 def test_covers_backfill(client, auth_headers, monkeypatch):
-    """Проверяет вызов пакетного заполнения обложек."""
-    cap_module = pytest.importorskip("plugins.cover_art.plugin")
-    monkeypatch.setattr(cap_module, "fetch_online_cover", lambda artist, title: (None, None, None))
+    """Проверяет вызов пакетного заполнения обложек через менеджер плагинов."""
+    from plugin_system.manager import plugin_manager
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(plugin_manager, "backfill_covers", AsyncMock(return_value={"processed": 5, "found": 3}))
     res = client.post("/api/covers/backfill?limit=5", headers=auth_headers)
-    assert res.status_code in (200, 503)
+    assert res.status_code == 200
+    assert res.json()["processed"] == 5
 

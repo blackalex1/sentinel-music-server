@@ -20,8 +20,8 @@ def test_get_track_candidates_success(client, auth_headers, sample_track, monkey
 
     mock_candidates = [
         {
-            "candidate_id": "source_a_12345",
-            "source": "source_a",
+            "candidate_id": "mock_cand_web_12345",
+            "source": "provider_web",
             "title": "Test Song (Remix)",
             "artist": "Test Artist",
             "duration": 190,
@@ -29,8 +29,8 @@ def test_get_track_candidates_success(client, auth_headers, sample_track, monkey
             "format": "mp3"
         },
         {
-            "candidate_id": "p2p_user_file",
-            "source": "p2p",
+            "candidate_id": "mock_cand_p2p_file",
+            "source": "provider_p2p",
             "title": "Test Song (Lossless)",
             "artist": "Test Artist",
             "format": "flac"
@@ -50,9 +50,9 @@ def test_get_track_candidates_success(client, auth_headers, sample_track, monkey
     assert data["current_artist"] == sample_track.artist
     assert len(data["candidates"]) == 2
 
-    # Проверяем, что can_preview проставлен: True для веб-источников, False для p2p
-    c1 = next(c for c in data["candidates"] if c["candidate_id"] == "source_a_12345")
-    c2 = next(c for c in data["candidates"] if c["candidate_id"] == "p2p_user_file")
+    # Проверяем, что can_preview проставлен: True для потоковых источников, False для фоновых
+    c1 = next(c for c in data["candidates"] if c["candidate_id"] == "mock_cand_web_12345")
+    c2 = next(c for c in data["candidates"] if c["candidate_id"] == "mock_cand_p2p_file")
     assert c1["can_preview"] is True
     assert c2["can_preview"] is False
 
@@ -67,7 +67,7 @@ def test_search_candidates_query_variations(client, auth_headers, monkeypatch):
     from plugin_system.manager import plugin_manager
 
     mock_search = AsyncMock(return_value=[
-        {"candidate_id": "c_mock_1", "source": "source_d", "title": "Track", "artist": "Artist"}
+        {"candidate_id": "c_mock_1", "source": "provider_b", "title": "Track", "artist": "Artist"}
     ])
     monkeypatch.setattr(plugin_manager, "search_all_candidates", mock_search)
 
@@ -92,7 +92,7 @@ def test_search_candidates_validation_and_caching(client, auth_headers, monkeypa
     from plugin_system.manager import plugin_manager
 
     mock_search = AsyncMock(return_value=[
-        {"candidate_id": "cached_cand_1", "source": "source_as", "title": "Song", "artist": "Band"}
+        {"candidate_id": "cached_cand_1", "source": "provider_c", "title": "Song", "artist": "Band"}
     ])
     monkeypatch.setattr(plugin_manager, "search_all_candidates", mock_search)
 
@@ -142,8 +142,8 @@ def test_replace_track_success(client, auth_headers, sample_track, tmp_path, mon
     })
 
     candidate_payload = {
-        "candidate_id": "source_c_9988",
-        "source": "source_c",
+        "candidate_id": "mock_cand_flac_9988",
+        "source": "provider_d",
         "title": "Upgraded Title",
         "artist": "Upgraded Artist",
         "format": "flac"
@@ -195,7 +195,7 @@ def test_replace_track_errors(client, auth_headers, sample_track, monkeypatch):
     assert r_500.status_code == 500
 
 
-def test_download_candidate_p2p(client, auth_headers, monkeypatch):
+def test_download_candidate_queued(client, auth_headers, monkeypatch):
     from plugin_system.manager import plugin_manager
 
     monkeypatch.setattr(
@@ -204,23 +204,23 @@ def test_download_candidate_p2p(client, auth_headers, monkeypatch):
         AsyncMock(return_value=True)
     )
 
-    candidate_p2p = {
-        "candidate_id": "p2p_123",
-        "source": "p2p",
-        "title": "P2P Song",
-        "artist": "P2P Artist",
+    candidate_queued = {
+        "candidate_id": "queued_123",
+        "source": "provider_p2p",
+        "title": "Queued Song",
+        "artist": "Queued Artist",
         "format": "flac"
     }
 
     res = client.post(
         "/api/tracks/candidates/download",
-        json={"candidate": candidate_p2p},
+        json={"candidate": candidate_queued},
         headers=auth_headers
     )
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "queued"
-    assert data["source"] == "P2P"
+    assert data["source"] == "Provider_p2p"
 
 
 def test_download_candidate_web(client, auth_headers, tmp_path, monkeypatch):
@@ -246,8 +246,8 @@ def test_download_candidate_web(client, auth_headers, tmp_path, monkeypatch):
     })
 
     candidate_web = {
-        "candidate_id": "source_a_777",
-        "source": "source_a",
+        "candidate_id": "web_777",
+        "source": "provider_web",
         "title": "Web Song",
         "artist": "Web Artist",
         "format": "mp3"
@@ -274,20 +274,20 @@ def test_preview_candidate_stream(client, auth_headers, monkeypatch):
     r_404 = client.get("/api/tracks/candidates/preview?candidate_id=non_existent_999", headers=auth_headers)
     assert r_404.status_code == 404
 
-    # 2. Кандидат из P2P -> 400 (предпрослушивание запрещено)
+    # 2. Кандидат без поддержки превью -> 400
     _register_candidates([{
-        "candidate_id": "p2p_test_cid",
-        "source": "p2p",
+        "candidate_id": "no_preview_cid",
+        "source": "provider_p2p",
         "title": "Song",
         "artist": "Artist"
     }])
-    r_p2p = client.get("/api/tracks/candidates/preview?candidate_id=p2p_test_cid", headers=auth_headers)
-    assert r_p2p.status_code == 400
+    r_nopreview = client.get("/api/tracks/candidates/preview?candidate_id=no_preview_cid", headers=auth_headers)
+    assert r_nopreview.status_code == 400
 
     # 3. Валидный веб-кандидат с потоковой отдачей
     _register_candidates([{
-        "candidate_id": "source_a_valid_preview",
-        "source": "source_a",
+        "candidate_id": "valid_preview_cid",
+        "source": "provider_web",
         "title": "Valid Stream",
         "artist": "Streamer"
     }])
@@ -295,7 +295,7 @@ def test_preview_candidate_stream(client, auth_headers, monkeypatch):
     monkeypatch.setattr(
         plugin_manager,
         "get_candidate_preview_url",
-        AsyncMock(return_value="https://d1.source_a.net/preview_audio.mp3")
+        AsyncMock(return_value="https://example.com/preview_audio.mp3")
     )
 
     mock_resp = MagicMock()
@@ -309,7 +309,7 @@ def test_preview_candidate_stream(client, auth_headers, monkeypatch):
     monkeypatch.setattr(requests, "get", MagicMock(return_value=mock_resp))
 
     res = client.get(
-        "/api/tracks/candidates/preview?candidate_id=source_a_valid_preview",
+        "/api/tracks/candidates/preview?candidate_id=valid_preview_cid",
         headers={**auth_headers, "Range": "bytes=0-1023"}
     )
     assert res.status_code == 206

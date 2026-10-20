@@ -115,14 +115,14 @@ async def import_discovery_track(
     db: Session = Depends(get_db)
 ):
     """
-    Запускает поиск и фоновое скачивание полного lossless трека через p2p (P2P) в фонотеку (требуются права администратора).
+    Запускает поиск и фоновую загрузку трека в фонотеку через активные модули импорта (требуются права администратора).
     """
     success = await plugin_manager.request_track_import(payload.artist, payload.title)
     return {
         "status": "queued" if success else "not_found",
         "artist": payload.artist,
         "title": payload.title,
-        "message": "Трек найден и поставлен в очередь загрузки FLAC" if success else "Трек не найден у активных пиров P2P"
+        "message": "Трек найден и поставлен в очередь фоновой загрузки" if success else "Трек не найден у доступных источников импорта"
     }
 
 

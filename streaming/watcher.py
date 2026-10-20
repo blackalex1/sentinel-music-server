@@ -192,7 +192,7 @@ class MusicLibraryWatcher:
                     to_process.append(path)
                     del self._pending_files[path]
                 except (OSError, PermissionError):
-                    # Файл занят другим процессом (например, идет запись p2p), ждем следующий цикл
+                    # Файл занят другим процессом (например, идет фоновая запись загрузчика), ждем следующий цикл
                     self._pending_files[path] = (now, last_size)
 
         indexed_count = 0

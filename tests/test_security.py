@@ -385,7 +385,7 @@ def test_ssrf_candidate_url_blocking(client, auth_headers, sample_track):
 
     for bad_url in malicious_urls:
         # Попытка предпрослушивания с небезопасным URL
-        r1 = client.get(f"/api/tracks/candidates/preview?candidate_id=source_a_@127.0.0.1:5432", headers=auth_headers)
+        r1 = client.get(f"/api/tracks/candidates/preview?candidate_id=mock_@127.0.0.1:5432", headers=auth_headers)
         assert r1.status_code in (400, 404)
 
         # Попытка подмены трека через произвольный dl_url

@@ -59,7 +59,7 @@ def test_scan_single_file_upgrades_existing_track_and_removes_old_file(tmp_path,
     db_session.add(reaction)
     db_session.commit()
 
-    # Скачивается FLAC файл с другим именем (например, с префиксом треклиста из P2P)
+    # Скачивается FLAC файл с другим именем (например, с префиксом треклиста)
     new_flac = saved_dir / "02. T-Fest - Song.flac"
     new_flac.write_bytes(b"dummy flac content")
 

@@ -1,6 +1,5 @@
 /**
- * Модуль предпрослушивания треков-кандидатов из плагинов (SourceA, SourceAs, SourceC, SourceD).
- * Исключает P2P (p2p) в соответствии с системными требованиями.
+ * Модуль предпрослушивания треков-кандидатов из подключенных плагинов.
  */
 
 import { API_BASE, getAuthToken } from './config.js';
@@ -20,7 +19,6 @@ if (typeof window !== 'undefined') {
 
 /**
  * Проверяет, поддерживает ли данный кандидат предпрослушивание.
- * Возвращает false для P2P (p2p).
  */
 export function isCandidatePreviewSupported(candidate) {
   if (!candidate) return false;

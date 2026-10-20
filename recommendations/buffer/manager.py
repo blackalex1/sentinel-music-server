@@ -27,7 +27,7 @@ class DiscoveryBufferManager:
     - В фоне держит 2-3 готовых трека (FLAC/MP3) в буферной папке discovery_buffer.
     - Треки стартуют в Потоке мгновенно и играют на 100% длительности.
     - Ведет на диске постоянный stream_history.json со всей историей треков в потоке.
-    - При лайке (❤️) трек переносится в постоянную фонотеку навсегда и ищется HQ/Lossless версия на P2P.
+    - При лайке (❤️) трек переносится в постоянную фонотеку навсегда и запрашивается поиск HQ/Lossless версии.
     - Нелайкнутые треки автоматически удаляются с диска и из БД через 3 дня (TTL).
     - Журнал stream_history.json сохраняется навсегда.
     """
@@ -206,7 +206,7 @@ class DiscoveryBufferManager:
 
                 self.save_history(records)
 
-                # Запускаем фоновый апгрейд качества трека по лайку (в первую очередь P2P P2P)
+                # Запускаем фоновый апгрейд качества трека по лайку через модули импорта
                 self.trigger_background_upgrade(
                     track_id=track_id,
                     artist=target_rec.get("artist"),
@@ -285,7 +285,7 @@ class DiscoveryBufferManager:
 
     def trigger_background_upgrade(self, track_id: int, artist: Optional[str], title: Optional[str]):
         """
-        Фоновый поиск и апгрейд качества трека по лайку (в первую очередь P2P).
+        Фоновый поиск и апгрейд качества трека по лайку через подключенные модули.
         """
         self.refiller.trigger_background_upgrade(
             track_id=track_id,
