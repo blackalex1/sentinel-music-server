@@ -153,6 +153,10 @@ export function initPlaylistsUI() {
     });
   }
 
+  window.addEventListener('playlists:reload', () => {
+    loadPlaylistsData();
+  });
+
   window.addEventListener('track:removed-from-playlist', (e) => {
     if (state.activePlaylist && e.detail && e.detail.playlistId === state.activePlaylist.id) {
       openPlaylistDetails(state.activePlaylist);

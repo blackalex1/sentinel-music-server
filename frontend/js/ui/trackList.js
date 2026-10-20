@@ -711,3 +711,8 @@ window.addEventListener('track:removed-from-playlist', (e) => {
   }
 });
 
+window.addEventListener('library:reload', () => {
+  loadLibraryTracks();
+});
+
+

@@ -275,6 +275,22 @@ export const Sentinel = {
     }
   },
 
+  library: {
+    /**
+     * Запрашивает обновление списка плейлистов в интерфейсе (сайдбар и карточки).
+     */
+    reloadPlaylists() {
+      window.dispatchEvent(new CustomEvent('playlists:reload'));
+    },
+
+    /**
+     * Запрашивает обновление списка треков локальной фонотеки в интерфейсе.
+     */
+    reloadTracks() {
+      window.dispatchEvent(new CustomEvent('library:reload'));
+    }
+  },
+
   api: {
     /**
      * Выполняет авторизованный сетевой запрос к бэкенду.
