@@ -290,12 +290,15 @@ class PluginManager:
             if p.name == target_plugin or (target_source and target_source in p.name.lower()):
                 try:
                     if hasattr(p, "get_candidate_preview_url"):
-                        return await p.get_candidate_preview_url(candidate)
+                        res = await p.get_candidate_preview_url(candidate)
+                        if res:
+                            return res
                 except Exception as e:
                     print(f"[PluginManager] Ошибка в get_candidate_preview_url плагина {p.name}: {e}")
                     return None
 
-        return None
+        # Прямой fallback: если у кандидата уже есть dl_url или preview_url
+        return candidate.get("preview_url") or candidate.get("dl_url")
 
     async def notify_reaction(self, track_id: int, is_like: bool, is_dislike: bool) -> None:
         """Оповещает плагины о реакции пользователя."""
@@ -364,8 +367,19 @@ class PluginManager:
         """
         Проверяет, поддерживает ли плагин кандидата предпрослушивание аудио.
         """
+        if not candidate:
+            return False
+
+        # Если в кандидате уже явно указано can_preview, уважаем его
+        if "can_preview" in candidate:
+            return bool(candidate["can_preview"])
+
         target_plugin = candidate.get("plugin_name", "")
         target_source = candidate.get("source", "").lower()
+
+        # Фоновые и P2P источники (Soulseek, torrent, p2p) не поддерживают прямое потоковое превью
+        if any(kw in target_source for kw in ("p2p", "slskd", "torrent", "soulseek")):
+            return False
 
         for p in self.plugins:
             if p.name == target_plugin or (target_source and target_source in p.name.lower()):

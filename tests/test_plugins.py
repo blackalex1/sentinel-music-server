@@ -92,26 +92,34 @@ def test_list_plugins_endpoint(client, auth_headers):
 def test_plugin_ui_assets_mounting(client, tmp_path):
     """Проверяет корректность раздачи изолированных статических ассетов плагина через HTTP."""
     from fastapi.staticfiles import StaticFiles
+    from starlette.routing import Mount
     from main import app
 
-    mock_ui_dir = tmp_path / "mock_ui"
-    mock_ui_dir.mkdir()
-    (mock_ui_dir / "index.js").write_text("export function init() {}", encoding="utf-8")
-    (mock_ui_dir / "styles.css").write_text(".mock-tab {}", encoding="utf-8")
-    (mock_ui_dir / "plugin.py").write_text("# private code", encoding="utf-8")
+    plugin_dir = tmp_path / "mock_plugin"
+    ui_dir = plugin_dir / "ui"
+    ui_dir.mkdir(parents=True)
+    (ui_dir / "index.js").write_text("export function init() {}", encoding="utf-8")
+    (ui_dir / "styles.css").write_text(".mock-tab {}", encoding="utf-8")
+    (plugin_dir / "plugin.py").write_text("# private code", encoding="utf-8")
 
-    app.mount("/plugins/test_mock_ui", StaticFiles(directory=str(mock_ui_dir)))
+    # Монтируем изолированную папку UI аналогично PluginManager
+    mount = Mount("/plugins/test_mock_ui", StaticFiles(directory=str(ui_dir)), name="plugin_ui_test_mock")
+    app.router.routes.insert(0, mount)
 
-    res_js = client.get("/plugins/test_mock_ui/index.js")
-    assert res_js.status_code == 200
-    assert "init" in res_js.text
+    try:
+        res_js = client.get("/plugins/test_mock_ui/index.js")
+        assert res_js.status_code == 200
+        assert "init" in res_js.text
 
-    res_css = client.get("/plugins/test_mock_ui/styles.css")
-    assert res_css.status_code == 200
+        res_css = client.get("/plugins/test_mock_ui/styles.css")
+        assert res_css.status_code == 200
 
-    # Проверяем, что исходный код Python (.py) изолирован и недоступен
-    res_py = client.get("/plugins/test_mock_ui/plugin.py")
-    assert res_py.status_code == 404
+        # Проверяем, что исходный код Python (.py) изолирован и недоступен
+        res_py = client.get("/plugins/test_mock_ui/plugin.py")
+        assert res_py.status_code == 404
+    finally:
+        if mount in app.router.routes:
+            app.router.routes.remove(mount)
 
 
 @pytest.mark.asyncio
