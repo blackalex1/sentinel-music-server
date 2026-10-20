@@ -66,6 +66,11 @@ export function switchView(viewName, shouldReload = true) {
   if (targetContainerId) {
     const el = document.getElementById(targetContainerId);
     if (el) {
+      // Гарантируем, что контейнер страницы плагина находится внутри рабочей области #contentArea
+      const contentArea = document.getElementById('contentArea') || document.querySelector('.content-scrollable');
+      if (contentArea && el.parentNode !== contentArea) {
+        contentArea.appendChild(el);
+      }
       const displayVal = (el.id === 'viewStream' || el.classList.contains('view-stream-container')) ? 'flex' : 'block';
       el.style.setProperty('display', displayVal, 'important');
     }

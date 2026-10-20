@@ -91,9 +91,12 @@ export const Sentinel = {
         pageContainer.className = 'view-page plugin-view-page';
         pageContainer.style.setProperty('display', 'none', 'important');
 
-        const mainContent = document.getElementById('mainContent') || document.querySelector('.main-content');
-        if (mainContent) {
-          mainContent.appendChild(pageContainer);
+        const contentArea = document.getElementById('contentArea') ||
+                            document.querySelector('.content-scrollable') ||
+                            document.getElementById('mainContent') ||
+                            document.querySelector('.main-view');
+        if (contentArea) {
+          contentArea.appendChild(pageContainer);
         } else {
           document.body.appendChild(pageContainer);
         }
