@@ -126,67 +126,72 @@ def scan_single_file(file_path: str, db: Session) -> Optional[Track]:
                 return is_lossless + (bitrate or 0) * 1000 + (fsize or 0)
 
             new_score = quality_score(meta.get("audio_format"), meta.get("bitrate"), meta.get("file_size"))
+            is_new_buffer = "discovery_buffer" in full_path.lower() or "saved_discoveries" in full_path.lower()
 
-            # Проверяем кандидатов: если новый файл лучше по качеству или заменяет сохраненный/буферный трек
+            # 1. Проверяем кандидатов: если существующий трек в Saved_Discoveries или discovery_buffer —
+            # обновляем его при лучшем качестве нового файла или замене на библиотечный
             for cand in existing_candidates:
                 cand_score = quality_score(cand.audio_format, cand.bitrate, cand.file_size)
                 is_cand_saved = "saved_discoveries" in (cand.file_path or "").lower()
-                is_cand_buffer = "discovery_buffer" in (cand.file_path or "").lower()
+                is_cand_buffer = "discovery_buffer" in (cand.file_path or "").lower() or cand.is_discovery
 
-                if new_score > cand_score or is_cand_saved or is_cand_buffer:
-                    old_path = cand.file_path
-                    cand.file_path = full_path
-                    cand.audio_format = meta.get("audio_format") or cand.audio_format
-                    cand.bitrate = meta.get("bitrate") or cand.bitrate
-                    cand.duration = meta.get("duration") or cand.duration
-                    cand.file_size = meta.get("file_size") or cand.file_size
-                    cand.is_discovery = "discovery_buffer" in full_path.lower()
-                    if meta.get("album"):
-                        cand.album = meta["album"]
-                    if meta.get("year"):
-                        cand.year = meta["year"]
-                    if meta.get("lyrics_synced"):
-                        cand.lyrics_synced = meta["lyrics_synced"]
+                if is_cand_saved or is_cand_buffer:
+                    if new_score > cand_score or not is_new_buffer:
+                        old_path = cand.file_path
+                        cand.file_path = full_path
+                        cand.audio_format = meta.get("audio_format") or cand.audio_format
+                        cand.bitrate = meta.get("bitrate") or cand.bitrate
+                        cand.duration = meta.get("duration") or cand.duration
+                        cand.file_size = meta.get("file_size") or cand.file_size
+                        cand.is_discovery = "discovery_buffer" in full_path.lower()
+                        if meta.get("album"):
+                            cand.album = meta["album"]
+                        if meta.get("year"):
+                            cand.year = meta["year"]
+                        if meta.get("lyrics_synced"):
+                            cand.lyrics_synced = meta["lyrics_synced"]
 
-                    db.commit()
-                    db.refresh(cand)
+                        db.commit()
+                        db.refresh(cand)
 
-                    # Удаляем старый файл более низкого качества
-                    if old_path and os.path.exists(old_path) and os.path.abspath(old_path) != full_path and is_safe_track_file_path(old_path):
-                        try:
-                            os.remove(old_path)
-                            print(f"[Scanner] [🗑️] Устаревший аудиофайл удален при авто-апгрейде: {old_path}")
-                        except Exception as e:
-                            print(f"[Scanner] Ошибка удаления устаревшего файла {old_path}: {e}")
-
-                        old_lrc = os.path.splitext(old_path)[0] + ".lrc"
-                        if os.path.exists(old_lrc) and is_safe_track_file_path(old_lrc):
+                        # Удаляем старый файл буфера более низкого качества
+                        if old_path and os.path.exists(old_path) and os.path.abspath(old_path) != full_path and is_safe_track_file_path(old_path):
                             try:
-                                os.remove(old_lrc)
-                            except Exception:
-                                pass
+                                os.remove(old_path)
+                                print(f"[Scanner] [🗑️] Устаревший аудиофайл буфера удален при авто-апгрейде: {old_path}")
+                            except Exception as e:
+                                print(f"[Scanner] Ошибка удаления устаревшего файла {old_path}: {e}")
 
-                    try:
-                        from recommendations.buffer_manager import discovery_buffer_manager
-                        discovery_buffer_manager.update_track_path(cand.id, full_path)
-                    except Exception:
-                        pass
+                            old_lrc = os.path.splitext(old_path)[0] + ".lrc"
+                            if os.path.exists(old_lrc) and is_safe_track_file_path(old_lrc):
+                                try:
+                                    os.remove(old_lrc)
+                                except Exception:
+                                    pass
 
-                    print(f"[Scanner] [❤️ Upgrade] Трек #{cand.id} '{cand.artist} - {cand.title}' успешно обновлен до {cand.audio_format.upper()} ({cand.bitrate} kbps).")
-                    return cand
+                        try:
+                            from recommendations.buffer_manager import discovery_buffer_manager
+                            discovery_buffer_manager.update_track_path(cand.id, full_path)
+                        except Exception:
+                            pass
 
-            # Если качество нового файла НЕ превосходит существующий:
-            # Если новый файл в Saved_Discoveries или discovery_buffer — удаляем избыточную низкокачественную копию
-            if "saved_discoveries" in full_path.lower() or "discovery_buffer" in full_path.lower():
+                        print(f"[Scanner] [❤️ Upgrade] Трек #{cand.id} '{cand.artist} - {cand.title}' успешно обновлен до {cand.audio_format.upper()} ({cand.bitrate} kbps).")
+                        return cand
+
+            # 2. Если новый файл — из буфера (discovery), а в фонотеке уже есть постоянный трек:
+            if is_new_buffer:
                 try:
                     os.remove(full_path)
-                    print(f"[Scanner] [Дубликат] Удален менее качественный дубликат из буфера: {full_path}")
+                    print(f"[Scanner] [Дубликат] Удален избыточный трек из буфера рекомендаций: {full_path}")
                 except Exception:
                     pass
                 return existing_candidates[0]
-            else:
-                print(f"[Scanner] [Дубликат] Трек '{artist} - {title}' уже присутствует в лучшем качестве в #{existing_candidates[0].id}.")
-                return existing_candidates[0]
+
+            # 3. Если и существующий трек, и новый файл — постоянные библиотечные файлы фонотеки (например, MP3 и FLAC):
+            # Мы НЕ удаляем старый файл! Мы регистрируем новый файл в БД как отдельный Track,
+            # чтобы оба файла отобразились в разделе «Дубликаты» (/tracks/duplicates),
+            # где пользователь сможет визуально сравнить спектры/битрейты и выбрать, какую версию сохранить.
+            print(f"[Scanner] [Дубликат] Обнаружена новая версия трека '{artist} - {title}' ({meta.get('audio_format')}, {meta.get('bitrate')} kbps). Добавлен в фонотеку для выбора в «Дубликаты».")
 
     meta["is_discovery"] = "discovery_buffer" in full_path.lower()
     track = Track(**meta)

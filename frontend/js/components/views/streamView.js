@@ -52,6 +52,14 @@ export function renderStreamView() {
           Музыка подстраивается под ваш ритм, вкусы и реакции в реальном времени
         </p>
 
+        <!-- Кнопка запуска Потока на основе текущего трека медиатеки -->
+        <div class="stream-seed-wrapper" id="streamSeedWrapper" style="display: none;">
+          <button type="button" class="btn-start-stream-from-track" id="btnStartStreamFromTrack">
+            <span class="seed-btn-icon">${icon('sparkles', { size: 16 })}</span>
+            <span class="seed-btn-label" id="btnStartStreamFromTrackLabel">Запустить Поток на основе этого трека</span>
+          </button>
+        </div>
+
         <!-- Карточка играющего трека внутри Потока -->
         <div class="stream-now-playing" id="streamNowPlaying">
           <div class="stream-np-cover-wrap">

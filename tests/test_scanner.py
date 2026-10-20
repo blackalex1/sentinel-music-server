@@ -106,3 +106,56 @@ def test_scan_single_file_upgrades_existing_track_and_removes_old_file(tmp_path,
     assert rx is not None
     assert rx.is_liked is True
 
+
+
+def test_scan_single_file_preserves_library_duplicate(tmp_path, db_session, monkeypatch):
+    from streaming.scanner import scan_single_file
+
+    music_dir = tmp_path / 'music'
+    music_dir.mkdir(parents=True, exist_ok=True)
+
+    old_mp3 = music_dir / 'Artist - Song.mp3'
+    old_mp3.write_bytes(b'dummy mp3 content')
+
+    track_mp3 = Track(
+        title='Song',
+        artist='Artist',
+        duration=180.0,
+        audio_format='mp3',
+        bitrate=192,
+        file_size=4_000_000,
+        file_path=str(old_mp3),
+        is_discovery=False
+    )
+    db_session.add(track_mp3)
+    db_session.commit()
+
+    new_flac = music_dir / 'Artist - Song.flac'
+    new_flac.write_bytes(b'dummy flac content')
+
+    def mock_extract(path):
+        if 'flac' in path:
+            return {
+                'title': 'Song',
+                'artist': 'Artist',
+                'album': 'Album',
+                'year': 2024,
+                'duration': 180.0,
+                'audio_format': 'flac',
+                'bitrate': 1000,
+                'file_size': 20_000_000,
+                'file_path': str(new_flac),
+                'lyrics_synced': None
+            }
+        return None
+
+    monkeypatch.setattr('streaming.scanner.extract_metadata', mock_extract)
+
+    result = scan_single_file(str(new_flac), db_session)
+
+    assert result is not None
+    assert result.id != track_mp3.id
+    assert result.audio_format == 'flac'
+    assert old_mp3.exists()
+    tracks = db_session.query(Track).filter(Track.title == 'Song', Track.artist == 'Artist').all()
+    assert len(tracks) == 2

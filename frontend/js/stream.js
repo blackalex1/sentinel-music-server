@@ -10,6 +10,7 @@ import { API_BASE } from './config.js';
 import { playTrack, togglePlay } from './player.js';
 import { icon } from './icons.js';
 import { toggleLikeAction, toggleDislikeAction } from './ui/reactions.js';
+import { showToast } from './ui/toast.js';
 
 let isLoadingStreamTrack = false;
 let analyticsPollingTimer = null;
@@ -23,11 +24,38 @@ export function initStream() {
   // Синхронизация состояния воспроизведения с анимацией сферы Потока
   onStateChange('isPlaying', (isPlaying) => {
     updateOrbUI(isPlaying);
+    updateStreamStatusUI();
   });
 
-  onStateChange('currentTrack', (track) => {
-    updateStreamCardTrackInfo(track);
+  onStateChange('currentTrack', () => {
+    updateStreamStatusUI();
   });
+
+  onStateChange('isStreamActive', (isActive) => {
+    updateStreamStatusUI();
+    updateOrbUI(state.isPlaying);
+    updateStreamButtonsUI(isActive);
+  });
+
+  onStateChange('currentView', (view) => {
+    if (view === 'stream') {
+      updateStreamStatusUI();
+      updateOrbUI(state.isPlaying);
+    }
+  });
+
+  // Кнопка запуска Потока на основе текущего трека
+  const btnStartStreamFromTrack = document.getElementById('btnStartStreamFromTrack');
+  if (btnStartStreamFromTrack) {
+    btnStartStreamFromTrack.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (state.currentTrack) {
+        startStreamFromCurrentTrack(state.currentTrack);
+      } else {
+        startStream();
+      }
+    });
+  }
 
   // Привязка клика по сфере Потока
   const orbContainerLarge = document.getElementById('streamOrbContainerLarge');
@@ -83,6 +111,9 @@ export function initStream() {
 
   // Инициализация виджета аналитики фонотеки
   initAnalyticsWidget();
+
+  // Первичная синхронизация состояния интерфейса
+  updateStreamStatusUI();
 }
 
 /**
@@ -90,10 +121,50 @@ export function initStream() {
  */
 export async function handleOrbClick() {
   if (!state.isStreamActive) {
-    await startStream();
+    if (state.currentTrack) {
+      await startStreamFromCurrentTrack(state.currentTrack);
+    } else {
+      await startStream();
+    }
   } else {
     togglePlay();
   }
+}
+
+/**
+ * Запускает Поток на основе уже играющего трека (Seed Track).
+ * Не прерывает воспроизведение текущего трека, но активирует алгоритмический поток
+ * для всех последующих рекомендаций и обновляет визуальный статус.
+ */
+export async function startStreamFromCurrentTrack(track) {
+  if (!track) {
+    await startStream();
+    return;
+  }
+
+  // 1. Активируем режим Потока
+  updateState('isStreamActive', true);
+  updateStreamButtonsUI(true);
+
+  // 2. Добавляем трек в недавние ID потока, чтобы избежать повторов
+  if (track.id > 0) {
+    const recents = Array.isArray(state.recentStreamIds) ? [...state.recentStreamIds] : [];
+    if (!recents.includes(track.id)) {
+      recents.push(track.id);
+      updateState('recentStreamIds', recents.slice(-50));
+    }
+  }
+
+  // 3. Если трек стоял на паузе — запускаем
+  if (!state.isPlaying) {
+    togglePlay();
+  }
+
+  // 4. Мгновенно синхронизируем интерфейс
+  updateStreamStatusUI();
+  updateOrbUI(true);
+
+  showToast(`✨ Поток запущен на основе «${track.artist} — ${track.title}»`, 'sparkles');
 }
 
 /**
@@ -335,39 +406,111 @@ function updateOrbUI(isPlaying) {
   }
 }
 
-function updateStreamCardTrackInfo(track) {
+export function updateStreamStatusUI() {
+  const isStream = !!state.isStreamActive;
+  const track = state.currentTrack;
+
+  const headerBadge = document.querySelector('.stream-header-badge');
+  const badgeText = headerBadge ? headerBadge.querySelector('.stream-badge-text') : null;
+  const badgePulse = headerBadge ? headerBadge.querySelector('.stream-badge-pulse') : null;
+  const heroSubtitle = document.getElementById('streamHeroSubtitle');
+  const seedWrapper = document.getElementById('streamSeedWrapper');
+  const seedBtnLabel = document.getElementById('btnStartStreamFromTrackLabel');
+
   const npTitle = document.getElementById('streamNpTitle');
   const npArtist = document.getElementById('streamNpArtist');
   const npCover = document.getElementById('streamNpCover');
   const npPlaceholder = document.getElementById('streamNpPlaceholder');
+  const npActions = document.querySelector('.stream-np-actions');
   const btnLike = document.getElementById('btnStreamLike');
-  const heroSubtitle = document.getElementById('streamHeroSubtitle');
 
-  if (track) {
-    if (npTitle) npTitle.textContent = track.title;
-    if (npArtist) npArtist.textContent = track.artist;
-    if (heroSubtitle) {
-      const discoveryReason = track.discovery_reason ? ` • ${track.discovery_reason}` : '';
-      heroSubtitle.textContent = `Сейчас играет: ${track.artist} — ${track.title}${discoveryReason}`;
+  if (isStream) {
+    // === РЕЖИМ: АКТИВНЫЙ ПОТОК ===
+    if (headerBadge) {
+      headerBadge.classList.remove('stream-idle');
     }
+    if (badgeText) badgeText.textContent = 'УМНЫЙ AI ПОТОК АКТИВЕН';
+    if (badgePulse) badgePulse.style.display = 'inline-block';
 
-    const coverUrl = track.cover_url || (track.id ? `${API_BASE}/api/covers/${track.id}` : '');
-    if (npCover) {
-      if (coverUrl) {
-        npCover.src = coverUrl;
-        npCover.style.display = 'block';
-        if (npPlaceholder) npPlaceholder.style.display = 'none';
-      } else {
-        npCover.style.display = 'none';
-        if (npPlaceholder) npPlaceholder.style.display = 'flex';
+    if (seedWrapper) seedWrapper.style.display = 'none';
+    if (npActions) npActions.style.display = 'flex';
+
+    if (track) {
+      if (npTitle) npTitle.textContent = track.title;
+      if (npArtist) npArtist.textContent = track.artist;
+      if (heroSubtitle) {
+        const discoveryReason = track.discovery_reason ? ` • ${track.discovery_reason}` : '';
+        heroSubtitle.textContent = `В Потоке: ${track.artist} — ${track.title}${discoveryReason}`;
+      }
+
+      const coverUrl = track.cover_url || (track.id ? `${API_BASE}/api/covers/${track.id}` : '');
+      if (npCover) {
+        if (coverUrl) {
+          npCover.src = coverUrl;
+          npCover.style.display = 'block';
+          if (npPlaceholder) npPlaceholder.style.display = 'none';
+        } else {
+          npCover.style.display = 'none';
+          if (npPlaceholder) npPlaceholder.style.display = 'flex';
+        }
+      }
+
+      if (btnLike) {
+        btnLike.classList.toggle('liked', !!track.is_liked);
+        btnLike.innerHTML = track.is_liked ? icon('heartFilled', { size: 18 }) : icon('heart', { size: 18 });
       }
     }
+  } else {
+    // === РЕЖИМ: ОБЫЧНОЕ ВОСПРОИЗВЕДЕНИЕ ИЛИ ОЖИДАНИЕ ===
+    if (headerBadge) {
+      headerBadge.classList.add('stream-idle');
+    }
+    if (badgeText) badgeText.textContent = 'УМНЫЙ AI ПОТОК (В ОЖИДАНИИ)';
+    if (badgePulse) badgePulse.style.display = 'none';
 
-    if (btnLike) {
-      btnLike.classList.toggle('liked', !!track.is_liked);
-      btnLike.innerHTML = track.is_liked ? icon('heartFilled', { size: 18 }) : icon('heart', { size: 18 });
+    if (track) {
+      // Обычный трек из медиатеки
+      if (heroSubtitle) {
+        heroSubtitle.textContent = `Играет из медиатеки: ${track.artist} — ${track.title}`;
+      }
+      if (seedWrapper) seedWrapper.style.display = 'flex';
+      if (seedBtnLabel) {
+        seedBtnLabel.textContent = `Запустить Поток на основе «${track.title}»`;
+      }
+
+      if (npTitle) npTitle.textContent = track.title;
+      if (npArtist) npArtist.textContent = `${track.artist} (Медиатека)`;
+      if (npActions) npActions.style.display = 'none'; // Скрываем кнопки стрим-пропуска для обычного трека
+
+      const coverUrl = track.cover_url || (track.id ? `${API_BASE}/api/covers/${track.id}` : '');
+      if (npCover) {
+        if (coverUrl) {
+          npCover.src = coverUrl;
+          npCover.style.display = 'block';
+          if (npPlaceholder) npPlaceholder.style.display = 'none';
+        } else {
+          npCover.style.display = 'none';
+          if (npPlaceholder) npPlaceholder.style.display = 'flex';
+        }
+      }
+    } else {
+      // Ничего не играет
+      if (heroSubtitle) {
+        heroSubtitle.textContent = 'Музыка подстраивается под ваш ритм, вкусы и реакции в реальном времени';
+      }
+      if (seedWrapper) seedWrapper.style.display = 'none';
+      if (npTitle) npTitle.textContent = 'Поток готов к запуску';
+      if (npArtist) npArtist.textContent = 'Нажмите на сферу для старта';
+      if (npActions) npActions.style.display = 'none';
+      if (npCover) npCover.style.display = 'none';
+      if (npPlaceholder) npPlaceholder.style.display = 'flex';
     }
   }
+}
+
+// Алиас для обратной совместимости
+function updateStreamCardTrackInfo(track) {
+  updateStreamStatusUI();
 }
 
 function updateStreamButtonsUI(isActive) {
