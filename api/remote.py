@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from database.db import get_db, SessionLocal
 from database.models import User, SessionToken, UserDevice, utc_now
-from core.security import get_current_user
+from core.security import get_current_user, decrypt_encrypted_token
 
 logger = logging.getLogger("sentinel.remote")
 
@@ -390,8 +390,14 @@ async def remote_websocket_endpoint(
     # Аутентификация пользователя по сессионному токену
     user_id: Optional[int] = None
     if "\x00" not in token:
-        with SessionLocal() as db:
-            session_record = db.query(SessionToken).filter(SessionToken.token == token.strip()).first()
+        lookup_token = token.strip()
+        if lookup_token.startswith("enc:v1:"):
+            decrypted = decrypt_encrypted_token(lookup_token)
+            lookup_token = decrypted
+
+        if lookup_token:
+            with SessionLocal() as db:
+                session_record = db.query(SessionToken).filter(SessionToken.token == lookup_token).first()
             if session_record:
                 if session_record.expires_at and session_record.expires_at < utc_now():
                     session_record = None

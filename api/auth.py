@@ -539,7 +539,8 @@ def get_qr_code(
 
     payload_data = {
         "url": server_url,
-        "token": enc_token
+        "token": enc_token,
+        "username": current_user.username
     }
     payload_json = json.dumps(payload_data, separators=(",", ":"))
 
@@ -585,7 +586,13 @@ def get_qr_image(
         if not raw_token:
             raise HTTPException(status_code=400, detail="Укажите параметр 'data' или 'token'")
 
-        session = db.query(SessionToken).filter(SessionToken.token == raw_token).first()
+        lookup_token = raw_token
+        if lookup_token.startswith("enc:v1:"):
+            decrypted = decrypt_encrypted_token(lookup_token)
+            if decrypted:
+                lookup_token = decrypted
+
+        session = db.query(SessionToken).filter(SessionToken.token == lookup_token).first()
         if not session or not session.user:
             raise HTTPException(status_code=401, detail="Недействительный токен сессии")
 

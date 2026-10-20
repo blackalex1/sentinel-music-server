@@ -79,6 +79,9 @@ def decrypt_encrypted_token(enc_token_str: str) -> Optional[str]:
     if not enc_token_str or not enc_token_str.startswith("enc:v1:"):
         return None
     raw_b64 = enc_token_str[len("enc:v1:"):]
+    missing_padding = len(raw_b64) % 4
+    if missing_padding:
+        raw_b64 += '=' * (4 - missing_padding)
     try:
         raw_blob = base64.urlsafe_b64decode(raw_b64.encode('ascii'))
         if len(raw_blob) < 12 + 16:  # 12 байт nonce + 16 байт tag
