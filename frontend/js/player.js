@@ -660,12 +660,36 @@ export function updateTimelineUI() {
 
 export function updatePlayButtonsUI(isPlaying) {
   const mainBtn = document.getElementById('ctrlPlayBtn');
-  const orbBtn = document.getElementById('streamOrbBtn') || document.getElementById('streamOrbLargeBtn');
-  const orb = document.getElementById('streamOrb');
-
   if (mainBtn) mainBtn.innerHTML = isPlaying ? icon('pause', { size: 18 }) : icon('play', { size: 18 });
-  if (orbBtn) orbBtn.innerHTML = isPlaying ? icon('pause', { size: 24 }) : icon('play', { size: 24 });
-  if (orb) orb.classList.toggle('playing', isPlaying);
+
+  // Сфера и виджет Потока должны отражать паузу/воспроизведение ТОЛЬКО если активен сам Поток!
+  const isStreamPlaying = isPlaying && !!state.isStreamActive;
+
+  const orbBtn = document.getElementById('streamOrbBtn');
+  const orb = document.getElementById('streamOrb');
+  if (orbBtn) orbBtn.innerHTML = isStreamPlaying ? icon('pause', { size: 24 }) : icon('play', { size: 24 });
+  if (orb) orb.classList.toggle('playing', isStreamPlaying);
+
+  const streamLargeIcon = document.getElementById('streamOrbLargeIcon');
+  if (streamLargeIcon) {
+    streamLargeIcon.innerHTML = isStreamPlaying ? icon('pause', { size: 38 }) : icon('play', { size: 38 });
+  }
+
+  const streamOrbLargeBtn = document.getElementById('streamOrbLargeBtn');
+  if (streamOrbLargeBtn) {
+    if (isStreamPlaying) {
+      streamOrbLargeBtn.title = 'Приостановить Поток (Пробел)';
+    } else if (state.currentTrack) {
+      streamOrbLargeBtn.title = `Запустить Поток на основе «${state.currentTrack.title}»`;
+    } else {
+      streamOrbLargeBtn.title = 'Включить Поток (Пробел)';
+    }
+  }
+
+  const streamOrbStage = document.getElementById('streamOrbStage');
+  if (streamOrbStage) {
+    streamOrbStage.classList.toggle('playing', isStreamPlaying);
+  }
 }
 
 export function updateTrackInfoUI(track) {
