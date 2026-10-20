@@ -22,10 +22,12 @@ export function initSettingsView() {
   setupServerHostForm();
   setupAdminUsersSection();
   setupSslSection();
+  setupAppUpdateSection();
 
   // При открытии экрана настроек обновляем видимость и данные
   window.addEventListener('settings:opened', () => {
     refreshSettingsScreen();
+    checkAppUpdate(true);
   });
 }
 
@@ -365,4 +367,97 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+
+/**
+ * 5. Проверка и загрузка обновлений с GitHub
+ */
+const CURRENT_DESKTOP_VERSION = '0.0.1';
+const GITHUB_DESKTOP_REPO = 'blackalex1/sentinel-music-desktop';
+
+function setupAppUpdateSection() {
+  const btnCheck = document.getElementById('btnCheckAppUpdate');
+  if (btnCheck) {
+    btnCheck.addEventListener('click', () => checkAppUpdate(false));
+  }
+}
+
+async function checkAppUpdate(silent = false) {
+  const statusEl = document.getElementById('appUpdateStatusText');
+  const btnCheck = document.getElementById('btnCheckAppUpdate');
+  const btnDownload = document.getElementById('btnDownloadAppUpdate');
+  const notesEl = document.getElementById('appUpdateNotes');
+
+  if (!statusEl) return;
+
+  if (!silent) {
+    statusEl.textContent = 'Проверка обновлений на GitHub...';
+    statusEl.style.color = 'var(--text-muted)';
+    if (btnCheck) btnCheck.disabled = true;
+  }
+
+  try {
+    const res = await fetch(`https://api.github.com/repos/${GITHUB_DESKTOP_REPO}/releases/latest`, {
+      headers: { 'Accept': 'application/vnd.github.v3+json' }
+    });
+
+    if (!res.ok) {
+      if (res.status === 404) {
+        statusEl.textContent = 'Релизов пока нет. У вас актуальная версия.';
+        return;
+      }
+      throw new Error(`Статус GitHub: ${res.status}`);
+    }
+
+    const data = await res.json();
+    const latestTag = (data.tag_name || '').replace(/^v/, '').trim();
+
+    if (isNewerVersion(latestTag, CURRENT_DESKTOP_VERSION)) {
+      statusEl.innerHTML = `<span style="color: #10b981; font-weight: 600;">✓ Доступна новая версия: v${latestTag}!</span>`;
+      if (btnDownload) {
+        const portableAsset = (data.assets || []).find(a => a.name.toLowerCase().includes('portable') && a.name.endsWith('.exe'));
+        const downloadUrl = portableAsset ? portableAsset.browser_download_url : data.html_url;
+        btnDownload.href = downloadUrl;
+        btnDownload.style.display = 'inline-flex';
+        btnDownload.textContent = portableAsset ? `Скачать v${latestTag} (Portable)` : `Открыть v${latestTag} на GitHub`;
+      }
+      if (notesEl && data.body) {
+        notesEl.style.display = 'block';
+        notesEl.textContent = data.body;
+      }
+      if (!silent) {
+        showToast(`Доступно обновление Sentinel Music v${latestTag}`, 'success');
+      }
+    } else {
+      statusEl.textContent = `У вас установлена самая свежая версия (v${CURRENT_DESKTOP_VERSION}).`;
+      statusEl.style.color = '#94a3b8';
+      if (btnDownload) btnDownload.style.display = 'none';
+      if (notesEl) notesEl.style.display = 'none';
+      if (!silent) {
+        showToast('Установлена актуальная версия', 'info');
+      }
+    }
+  } catch (err) {
+    if (!silent) {
+      statusEl.textContent = 'Не удалось связаться с GitHub. Проверьте интернет-соединение.';
+      statusEl.style.color = '#f87171';
+      showToast('Ошибка при проверке обновлений', 'alert');
+    }
+  } finally {
+    if (btnCheck) btnCheck.disabled = false;
+  }
+}
+
+function isNewerVersion(latest, current) {
+  if (!latest || !current) return false;
+  const pLatest = latest.split('.').map(n => parseInt(n, 10) || 0);
+  const pCurrent = current.split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pLatest.length, pCurrent.length); i++) {
+    const l = pLatest[i] || 0;
+    const c = pCurrent[i] || 0;
+    if (l > c) return true;
+    if (l < c) return false;
+  }
+  return false;
 }

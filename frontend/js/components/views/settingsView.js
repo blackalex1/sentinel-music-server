@@ -97,6 +97,39 @@ export function renderSettingsView() {
             <div id="settingsPluginExtensions"></div>
           </div>
 
+                    <!-- Карточка обновления программы (GitHub) -->
+          <div class="settings-card" id="screenAppUpdateCard">
+            <div class="settings-card-header">
+              <div class="settings-card-icon" style="color: #38bdf8;">${icon('download', { size: 20 })}</div>
+              <div>
+                <h3 class="settings-card-title">Обновление программы</h3>
+                <div class="settings-card-desc">Проверка доступности свежих версий приложения на GitHub</div>
+              </div>
+            </div>
+
+            <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div>
+                  <div style="font-size: 0.92rem; font-weight: 600; color: #fff;">
+                    Установленная версия: <span id="appCurrentVersionText" style="color: #a78bfa;">v0.0.1</span>
+                  </div>
+                  <div id="appUpdateStatusText" style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">
+                    Нажмите «Проверить обновления» для связи с GitHub.
+                  </div>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <button type="button" class="btn-secondary" id="btnCheckAppUpdate" style="padding: 8px 16px; font-size: 0.85rem;">
+                    Проверить обновления
+                  </button>
+                  <a id="btnDownloadAppUpdate" href="#" target="_blank" class="btn-primary" style="display: none; padding: 8px 18px; font-size: 0.85rem; text-decoration: none; align-items: center; gap: 6px;">
+                    Скачать с GitHub
+                  </a>
+                </div>
+              </div>
+              <div id="appUpdateNotes" style="display: none; margin-top: 12px; padding: 10px 12px; background: rgba(0, 0, 0, 0.25); border-radius: 8px; font-size: 0.8rem; color: #cbd5e1; max-height: 100px; overflow-y: auto;"></div>
+            </div>
+          </div>
+
           <!-- 3. Карточка SSL / HTTPS (Доступна администратору) -->
           <div class="settings-card" id="screenSslCard" style="display: none;">
             <div class="settings-card-header">
