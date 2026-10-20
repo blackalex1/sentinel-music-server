@@ -256,6 +256,35 @@ export function shuffleListWithFirst(firstTrack, list) {
   return [firstTrack, ...others];
 }
 
+let isInitializingShuffle = false;
+
+/**
+ * Инициализирует очередь перемешивания случайными треками со всего сервера (всей фонотеки).
+ * Запускается асинхронно при старте трека с включенным режимом Shuffle,
+ * гарантируя, что перемешивается вся коллекция, а не только текущая порция на экране.
+ */
+export async function initServerShuffleQueue(seedTrack) {
+  if (!seedTrack || !state.isShuffle || state.activePlaylist || state.isStreamActive) return;
+  if (isInitializingShuffle) return;
+  isInitializingShuffle = true;
+
+  try {
+    const mood = state.streamMood && state.streamMood !== 'default' && state.streamMood !== 'all' ? state.streamMood : null;
+    const serverTracks = await fetchShuffleTracks(50, mood, [seedTrack.id]);
+    if (serverTracks && serverTracks.length > 0 && state.isShuffle && state.currentTrack && state.currentTrack.id === seedTrack.id && !state.activePlaylist && !state.isStreamActive) {
+      const filtered = serverTracks.filter(t => t.id !== seedTrack.id);
+      updateState('queue', [seedTrack, ...filtered]);
+      updateState('queueIndex', 0);
+      savePlaybackSession(true);
+      console.log(`[Shuffle] Очередь случайного порядка обновлена со всего сервера (${filtered.length} треков)`);
+    }
+  } catch (err) {
+    console.warn('[Shuffle] Ошибка загрузки серверного микса всей фонотеки:', err);
+  } finally {
+    isInitializingShuffle = false;
+  }
+}
+
 export function playTrack(track, queueList = null, isStream = false, autoPlay = true, startPosition = 0) {
   if (!track) return;
 
@@ -270,10 +299,21 @@ export function playTrack(track, queueList = null, isStream = false, autoPlay = 
   if (queueList) {
     const hasTrack = queueList.some(t => t.id === track.id);
     const effectiveQueue = hasTrack ? queueList : [track, ...queueList];
-    if (state.isShuffle && effectiveQueue.length > 1) {
-      const shuffledQueue = shuffleListWithFirst(track, effectiveQueue);
-      updateState('queue', shuffledQueue);
-      updateState('queueIndex', 0);
+    if (state.isShuffle) {
+      if (effectiveQueue.length > 1) {
+        const shuffledQueue = shuffleListWithFirst(track, effectiveQueue);
+        updateState('queue', shuffledQueue);
+        updateState('queueIndex', 0);
+      } else {
+        updateState('queue', effectiveQueue);
+        updateState('queueIndex', 0);
+      }
+
+      // Если режим Shuffle включен и мы в общей фонотеке (не в плейлисте и не в стриме):
+      // наполняем очередь случайными треками со всего сервера (всей медиатеки)!
+      if (!state.activePlaylist && !isStream) {
+        initServerShuffleQueue(track);
+      }
     } else {
       updateState('queue', effectiveQueue);
       const idx = effectiveQueue.findIndex(t => t.id === track.id);
@@ -299,9 +339,15 @@ export function playTrack(track, queueList = null, isStream = false, autoPlay = 
       updateState('queue', newQ);
       updateState('queueIndex', insertAt);
     }
+    if (state.isShuffle && !state.activePlaylist && !isStream) {
+      initServerShuffleQueue(track);
+    }
   } else {
     updateState('queue', [track]);
     updateState('queueIndex', 0);
+    if (state.isShuffle && !state.activePlaylist && !isStream) {
+      initServerShuffleQueue(track);
+    }
   }
 
   updateState('currentTrack', track);
@@ -402,10 +448,12 @@ export async function nextTrack() {
   // Динамическая серверная подгрузка для бесконечного воспроизведения Shuffle
   if (state.isShuffle && !state.activePlaylist && state.queueIndex >= state.queue.length - 3) {
     try {
-      const more = await fetchShuffleTracks(30);
+      const existingIds = state.queue.map(t => t.id);
+      const mood = state.streamMood && state.streamMood !== 'default' && state.streamMood !== 'all' ? state.streamMood : null;
+      const more = await fetchShuffleTracks(30, mood, existingIds.slice(-100));
       if (more && more.length > 0) {
-        const existingIds = new Set(state.queue.map(t => t.id));
-        const filtered = more.filter(t => !existingIds.has(t.id));
+        const existingSet = new Set(existingIds);
+        const filtered = more.filter(t => !existingSet.has(t.id));
         if (filtered.length > 0) {
           updateState('queue', [...state.queue, ...filtered]);
         }
@@ -529,8 +577,13 @@ export async function toggleShuffle() {
       updateState('queue', shuffled);
       updateState('queueIndex', 0);
       savePlaybackSession(true);
+      if (!state.activePlaylist && !state.isStreamActive) {
+        initServerShuffleQueue(state.currentTrack);
+      }
     } else if (!state.activePlaylist && !state.isStreamActive) {
-      if (!state.currentTrack || !state.isPlaying) {
+      if (state.currentTrack) {
+        initServerShuffleQueue(state.currentTrack);
+      } else if (!state.isPlaying) {
         await playShuffleTracks();
       }
     }

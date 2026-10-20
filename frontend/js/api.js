@@ -98,10 +98,13 @@ export async function fetchTracksCount(mood = null) {
   return res.json();
 }
 
-export async function fetchShuffleTracks(limit = 50, mood = null) {
+export async function fetchShuffleTracks(limit = 50, mood = null, excludeIds = []) {
   let url = `/api/tracks/shuffle?limit=${limit}`;
   if (mood && mood !== 'default' && mood !== 'all') {
     url += `&mood=${encodeURIComponent(mood)}`;
+  }
+  if (Array.isArray(excludeIds) && excludeIds.length > 0) {
+    url += `&exclude_ids=${encodeURIComponent(excludeIds.slice(0, 100).join(','))}`;
   }
   const res = await apiFetch(url);
   if (!res.ok) return [];

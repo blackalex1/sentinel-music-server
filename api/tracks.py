@@ -94,6 +94,7 @@ def get_tracks_count(
 def get_shuffled_tracks(
     mood: str | None = Query(None, description="Фильтр по настроению: energy, chill, happy, sad"),
     limit: int = Query(50, ge=1, le=500),
+    exclude_ids: str | None = Query(None, description="Список ID треков для исключения через запятую"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -110,6 +111,14 @@ def get_shuffled_tracks(
     query = apply_library_filter(query)
     query = apply_mood_filter(query, mood)
     query = query.filter(~Track.id.in_(disliked_subquery))
+
+    if exclude_ids:
+        try:
+            ex_list = [int(x) for x in exclude_ids.split(",") if x.strip().isdigit()]
+            if ex_list:
+                query = query.filter(~Track.id.in_(ex_list[:250]))
+        except Exception:
+            pass
 
     random_tracks = query.order_by(func.random()).limit(limit).all()
     return random_tracks

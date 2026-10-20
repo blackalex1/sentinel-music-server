@@ -77,6 +77,11 @@ def test_get_shuffled_tracks(client, auth_headers, sample_track):
     assert len(tracks) >= 1
     assert tracks[0]["title"] == sample_track.title
 
+    # Тест серверного шаффла с исключением ID
+    res_ex = client.get(f"/api/tracks/shuffle?limit=10&exclude_ids={sample_track.id}", headers=auth_headers)
+    assert res_ex.status_code == 200
+    assert not any(t["id"] == sample_track.id for t in res_ex.json())
+
 
 def test_get_recent_tracks(client, auth_headers, sample_track, db_session):
     from database.models import Track
