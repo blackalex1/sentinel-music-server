@@ -45,13 +45,16 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pytest httpx
+          pip install -r requirements.txt pytest httpx pytest-asyncio
 
       - name: Run Pytest Suite
         env:
           DATABASE_URL: postgresql://sentinel:sentinel_test_password@localhost:5432/sentinel_music_test
           SECRET_KEY: test-ci-secret-key-for-sentinel-music-32
+          MUSIC_DIR: /tmp/sentinel_ci_music
+          PLUGINS_DIR: plugins
         run: |
+          mkdir -p /tmp/sentinel_ci_music
           pytest tests/ -v
 
   build-docker:

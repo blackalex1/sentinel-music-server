@@ -24,6 +24,8 @@ settings.AUTO_GENERATE_ADMIN = False
 settings.WATCHDOG_ENABLED = False
 TEST_DATA_DIR = tempfile.mkdtemp(prefix="sentinel_test_data_")
 settings.DATA_DIR = TEST_DATA_DIR
+TEST_MUSIC_DIR = tempfile.mkdtemp(prefix="sentinel_test_music_")
+settings.MUSIC_DIR = TEST_MUSIC_DIR
 
 # Защита от запуска фоновых воркеров во время тестов
 from recommendations.buffer_manager import discovery_buffer_manager
