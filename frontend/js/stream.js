@@ -516,8 +516,12 @@ export function updateStreamStatusUI() {
         heroSubtitle.textContent = `Поток не запущен • В фонотеке играет: ${track.artist} — ${track.title}`;
       }
       if (seedWrapper) seedWrapper.style.display = 'flex';
+      const seedBtn = document.getElementById('btnStartStreamFromTrack');
+      if (seedBtn) {
+        seedBtn.title = `Запустить Поток на основе «${track.artist} — ${track.title}»`;
+      }
       if (seedBtnLabel) {
-        seedBtnLabel.textContent = `Запустить Поток на основе «${track.artist} — ${track.title}»`;
+        seedBtnLabel.innerHTML = `Запустить Поток на основе <span class="seed-btn-track-name">«${escapeHtml(track.artist)} — ${escapeHtml(track.title)}»</span>`;
       }
     } else {
       // Ничего не играет
