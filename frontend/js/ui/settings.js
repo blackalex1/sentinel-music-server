@@ -374,7 +374,8 @@ function escapeHtml(str) {
  * 5. Проверка и загрузка обновлений с GitHub
  */
 const CURRENT_DESKTOP_VERSION = '0.0.1';
-const GITHUB_DESKTOP_REPO = 'blackalex1/sentinel-music-desktop';
+const isTauriDesktop = !!(window.__TAURI_INTERNALS__ || window.__TAURI__);
+const GITHUB_DESKTOP_REPO = isTauriDesktop ? 'blackalex1/sentinel-music-desktop' : 'blackalex1/sentinel-music-server';
 
 function setupAppUpdateSection() {
   const btnCheck = document.getElementById('btnCheckAppUpdate');
