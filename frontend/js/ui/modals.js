@@ -477,18 +477,7 @@ export function setupModals() {
     });
   }
 
-  const btnOpenBatchModal = document.getElementById('btnOpenBatchFromUploadModal');
-  if (btnOpenBatchModal) {
-    btnOpenBatchModal.addEventListener('click', async () => {
-      hideUploadTracksModal();
-      try {
-        await apiFetch('/api/task-import/unhide', { method: 'POST' });
-      } catch (err) {}
-      const navItem = document.getElementById('navItemBatchImport');
-      if (navItem) navItem.style.display = 'flex';
-      switchView('batchImport');
-    });
-  }
+
 }
 
 
@@ -603,6 +592,13 @@ export function openUploadTracksModal(initialFiles = null) {
     addFilesToUploadQueue(initialFiles);
   } else {
     updateUploadModalUI();
+  }
+
+  // Динамический рендеринг расширений плагинов
+  const uploadExtContainer = document.getElementById('uploadModalPluginExtensions');
+  if (uploadExtContainer && window.Sentinel && window.Sentinel.ui) {
+    uploadExtContainer.innerHTML = '';
+    window.Sentinel.ui.renderExtensionPoints('upload:modal', uploadExtContainer);
   }
 
   modal.classList.add('active');

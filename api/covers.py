@@ -163,11 +163,9 @@ async def backfill_covers(
     Запускает фоновое/пакетное заполнение обложек для треков фонотеки,
     у которых они пока отсутствуют (требуются права администратора).
     """
-    cover_plugin = plugin_manager.get_plugin("CoverPlugin")
-    if not cover_plugin or not hasattr(cover_plugin, "backfill_covers"):
-        raise HTTPException(status_code=503, detail="Плагин CoverPlugin не активен")
-
-    result = await cover_plugin.backfill_covers(db, limit=limit)
+    result = await plugin_manager.backfill_covers(db, limit=limit)
+    if result.get("status") == "no_provider":
+        raise HTTPException(status_code=503, detail=result.get("message", "Модуль заполнения обложек не активен"))
     return result
 
 
@@ -184,15 +182,7 @@ async def refresh_track_cover(
     if not track:
         raise HTTPException(status_code=404, detail="Трек не найден")
 
-    cover_plugin = plugin_manager.get_plugin("CoverPlugin")
-    if cover_plugin and hasattr(cover_plugin, "cache_dir"):
-        for ext in [".jpg", ".jpeg", ".png", ".webp", ".none"]:
-            cand = os.path.join(cover_plugin.cache_dir, f"{track_id}{ext}")
-            if os.path.exists(cand):
-                try:
-                    os.remove(cand)
-                except Exception:
-                    pass
+    plugin_manager.clear_cover_cache(track_id)
 
     data, mime = await plugin_manager.get_track_cover(track)
     if data and mime:

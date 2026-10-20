@@ -74,8 +74,11 @@ def mock_plugin_network_and_ingestion(monkeypatch):
     """
     from unittest.mock import AsyncMock
     from plugin_system.manager import plugin_manager
-    import plugins.cover_art.plugin as cap_module
-    import plugins.cover_art.online as cao_module
+    try:
+        import plugins.cover_art.plugin as cap_module
+        import plugins.cover_art.online as cao_module
+    except ImportError:
+        pass
 
     monkeypatch.setattr(plugin_manager, "request_track_import", AsyncMock(return_value=True))
     monkeypatch.setattr(plugin_manager, "download_selected_candidate", AsyncMock(return_value=True))

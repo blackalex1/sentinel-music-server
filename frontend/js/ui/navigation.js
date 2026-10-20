@@ -9,6 +9,12 @@ import { loadPlaylistsData, closePlaylistDetails } from './playlists.js';
 import { loadDuplicates } from './duplicates.js';
 import { toggleLyricsOverlay } from '../lyrics.js';
 
+const pluginViews = new Map(); // viewId -> { containerId, onShow, onHide }
+
+export function registerPluginNavigation(viewId, containerId, hooks = {}) {
+  pluginViews.set(viewId, { containerId, ...hooks });
+}
+
 export function switchView(viewName, shouldReload = true) {
   updateState('currentView', viewName);
   disconnectTracksScrollObserver();
@@ -19,29 +25,54 @@ export function switchView(viewName, shouldReload = true) {
     item.classList.toggle('active', item.dataset.view === viewName);
   });
 
-  // Скрываем все страницы контента и показываем целевую
-  const views = ['viewMain', 'viewStream', 'viewTracks', 'viewPlaylists', 'viewDuplicates', 'viewBatchImport', 'viewSettings'];
-  views.forEach(v => {
-    const el = document.getElementById(v);
-    if (el) el.style.setProperty('display', 'none', 'important');
-  });
-
-  const activeTarget = {
+  // Карта основных экранов ядра
+  const coreViewMap = {
     main: 'viewMain',
     stream: 'viewStream',
     tracks: 'viewTracks',
     playlists: 'viewPlaylists',
     duplicates: 'viewDuplicates',
-    batchImport: 'viewBatchImport',
     settings: 'viewSettings'
-  }[viewName];
+  };
 
-  if (activeTarget) {
-    const el = document.getElementById(activeTarget);
+  // Скрываем все экраны ядра
+  Object.values(coreViewMap).forEach(v => {
+    const el = document.getElementById(v);
+    if (el) el.style.setProperty('display', 'none', 'important');
+  });
+
+  // Скрываем все зарегистрированные экраны плагинов
+  pluginViews.forEach((info, vId) => {
+    const el = document.getElementById(info.containerId);
+    if (el) el.style.setProperty('display', 'none', 'important');
+    if (info.onHide && vId !== viewName) {
+      try { info.onHide(); } catch (err) { console.error(err); }
+    }
+  });
+
+  // Также скрываем любые кастомные экраны плагинов
+  document.querySelectorAll('.plugin-view-page').forEach(el => {
+    el.style.setProperty('display', 'none', 'important');
+  });
+
+  let targetContainerId = coreViewMap[viewName];
+  let pluginHook = null;
+
+  if (pluginViews.has(viewName)) {
+    pluginHook = pluginViews.get(viewName);
+    targetContainerId = pluginHook.containerId;
+  }
+
+  if (targetContainerId) {
+    const el = document.getElementById(targetContainerId);
     if (el) {
       const displayVal = (el.id === 'viewStream' || el.classList.contains('view-stream-container')) ? 'flex' : 'block';
       el.style.setProperty('display', displayVal, 'important');
     }
+  }
+
+  if (pluginHook && typeof pluginHook.onShow === 'function') {
+    try { pluginHook.onShow(); } catch (err) { console.error(err); }
   }
 
   // Обновляем контент в зависимости от вкладки

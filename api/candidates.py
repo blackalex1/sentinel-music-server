@@ -17,23 +17,10 @@ from core.security import get_current_user, get_current_admin_user
 
 router = APIRouter(tags=["Кандидаты и Импорт версий"])
 
-# Разрешенные внешние каталоги для скачивания и предпрослушивания (SSRF Protection)
-ALLOWED_INGESTION_DOMAINS = {
-    "source_a.net",
-    "music.source_a.net",
-    "d1.source_a.net",
-    "source_as.fm",
-    "source_atop.com",
-    "rus.source_atop.com",
-    "source_d.com",
-    "source_c.net",
-}
-
-
 def is_safe_download_url(url: str | None) -> bool:
     """
-    Защита от SSRF: проверяет URL на соответствие разрешенным аудио-каталогам
-    и блокирует любые попытки обращения к приватным/локальным IP-адресам или метаданным.
+    Универсальная защита от SSRF: блокирует любые попытки обращения к приватным/локальным IP-адресам,
+    loopback, link-local, cloud metadata и внутренним сетям без жесткой привязки к доменам плагинов.
     """
     if not url or not isinstance(url, str):
         return False
@@ -50,22 +37,21 @@ def is_safe_download_url(url: str | None) -> bool:
         if "@" in parsed.netloc:
             return False
 
-        # Запрет любых прямых IP-адресов
+        # Запрет прямых IP-адресов приватных и loopback диапазонов
         try:
-            ipaddress.ip_address(hostname)
-            return False
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+                return False
+            if str(ip).startswith("169.254."):
+                return False
         except ValueError:
             pass
 
         host_lower = hostname.lower()
-        if host_lower in ("localhost", "host.docker.internal"):
+        if host_lower in ("localhost", "host.docker.internal") or host_lower.endswith(".local") or host_lower.endswith(".internal"):
             return False
 
-        # Проверяем, что домен принадлежит белому списку
-        for allowed in ALLOWED_INGESTION_DOMAINS:
-            if host_lower == allowed or host_lower.endswith("." + allowed):
-                return True
-        return False
+        return True
     except Exception:
         return False
 
@@ -100,7 +86,8 @@ def _register_candidates(candidates: List[Dict[str, Any]]):
     for c in candidates:
         cid = c.get("candidate_id")
         src = c.get("source", "").lower()
-        c["can_preview"] = (src != "p2p")
+        from plugin_system.manager import plugin_manager
+        c["can_preview"] = plugin_manager.can_preview_candidate(c)
         if cid:
             _CANDIDATES_BY_ID[cid] = (now, c)
     if len(_CANDIDATES_BY_ID) > 2000:
@@ -119,52 +106,12 @@ def _get_candidate_by_id(cid: str) -> Optional[Dict[str, Any]]:
         else:
             _CANDIDATES_BY_ID.pop(cid, None)
 
-    # Интеллектуальное восстановление по ID источника если запись устарела в кэше
-    # Валидация формата ID для защиты от инъекций в URL
-    raw_id_pattern = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
-
-    if cid.startswith("source_a_"):
-        raw_id = cid[len("source_a_"):]
-        if not raw_id_pattern.match(raw_id):
-            return None
-        return {
-            "candidate_id": cid,
-            "source": "source_a",
-            "plugin_name": "SourceAIngestionPlugin",
-            "dl_url": f"https://d1.source_a.net/{raw_id}"
-        }
-    elif cid.startswith("source_d_"):
-        raw_id = cid[len("source_d_"):]
-        if not raw_id_pattern.match(raw_id):
-            return None
-        return {
-            "candidate_id": cid,
-            "source": "source_d",
-            "plugin_name": "SourceDIngestionPlugin",
-            "dl_url": f"https://source_d.com/download/{raw_id}"
-        }
-    elif cid.startswith("source_as_"):
-        raw_id = cid[len("source_as_"):]
-        if not raw_id_pattern.match(raw_id):
-            return None
-        return {
-            "candidate_id": cid,
-            "source": "source_as",
-            "plugin_name": "SourceBIngestionPlugin",
-            "song_url": f"https://source_as.fm/song/{raw_id}"
-        }
-    elif cid.startswith("source_c_"):
-        raw_id = cid[len("source_c_"):]
-        try:
-            tid = int(raw_id)
-            return {
-                "candidate_id": cid,
-                "source": "source_c",
-                "plugin_name": "SourceCIngestionPlugin",
-                "track_id": tid
-            }
-        except ValueError:
-            pass
+    # Восстановление кандидата через плагины без хардкода префиксов в ядре
+    from plugin_system.manager import plugin_manager
+    cand = plugin_manager.resolve_candidate(cid)
+    if cand:
+        _CANDIDATES_BY_ID[cid] = (now, cand)
+        return cand
     return None
 
 
@@ -381,20 +328,20 @@ async def download_candidate_endpoint(
     fmt = str(candidate.get("format", "mp3")).lower()
     music_root = os.getenv("MUSIC_DIR") or "/music"
 
-    # Если P2P — отправляем команду в очередь p2p
-    if source == "p2p":
+    # Если источник фоновый/очередной (не поддерживает прямой предпросмотр и синхронную запись)
+    if not plugin_manager.can_preview_candidate(candidate):
         dest = "" if fmt == "flac" else "non-flac"
         success = await plugin_manager.download_selected_candidate(candidate, destination=dest)
         if not success:
-            raise HTTPException(status_code=500, detail="Ошибка постановки в очередь P2P")
+            raise HTTPException(status_code=500, detail=f"Ошибка постановки в очередь загрузчика ({source.capitalize()})")
         return {
             "status": "queued",
-            "source": "P2P",
+            "source": source.capitalize(),
             "destination": dest or "flac-root",
-            "message": "Файл успешно поставлен в очередь фоновой загрузки сервера (P2P)"
+            "message": f"Файл успешно поставлен в очередь фоновой загрузки сервера ({source.capitalize()})"
         }
 
-    # Для веб-источников (SourceA, SourceAs, SourceC, SourceD)
+    # Для синхронных веб-источников
     non_flac_dir = os.path.join(music_root, "non-flac")
     target_dir = non_flac_dir if os.path.exists(non_flac_dir) else music_root
     os.makedirs(target_dir, exist_ok=True)
@@ -464,11 +411,10 @@ async def preview_candidate_stream(
     if not candidate:
         raise HTTPException(status_code=404, detail="Кандидат не найден или срок действия ссылки истек")
 
-    source = candidate.get("source", "").lower()
-    if source == "p2p":
-        raise HTTPException(status_code=400, detail="Предпрослушивание для P2P не поддерживается")
-
     from plugin_system.manager import plugin_manager
+    if not plugin_manager.can_preview_candidate(candidate):
+        raise HTTPException(status_code=400, detail="Предпрослушивание треков из этого источника не поддерживается")
+
     preview_url = await plugin_manager.get_candidate_preview_url(candidate)
     if not preview_url:
         raise HTTPException(status_code=404, detail="Не удалось получить поток для прослушивания")
@@ -476,20 +422,13 @@ async def preview_candidate_stream(
     if not is_safe_download_url(preview_url):
         raise HTTPException(status_code=400, detail="Недопустимый или небезопасный URL аудиопотока")
 
-    # Формируем корректные заголовки для обхода анти-хотлинка веб-источников
+    # Получаем специфичные заголовки напрямую от плагина-источника
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
-    if "source_a" in preview_url or "source_a" in source:
-        headers["Referer"] = "https://music.source_a.net/"
-        headers["Cookie"] = "hq=1"
-    elif "source_as" in preview_url or "source_as" in source:
-        headers["Referer"] = "https://source_as.fm/"
-        headers["Cookie"] = "hq=1"
-    elif "source_d" in preview_url or "source_d" in source:
-        headers["Referer"] = "https://source_d.com/"
-    elif "source_c" in preview_url or "source_c" in source:
-        headers["Referer"] = "https://source_c.net/"
+    plugin_headers = plugin_manager.get_candidate_preview_headers(candidate)
+    if plugin_headers:
+        headers.update(plugin_headers)
 
     if range:
         headers["Range"] = range

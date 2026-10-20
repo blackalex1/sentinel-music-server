@@ -134,17 +134,10 @@ function setupServerHostForm() {
     });
   }
 
-  // Кнопка быстрого перехода к отчету пакетного скачивания
-  const btnOpenBatch = document.getElementById('btnOpenBatchFromSettings');
-  if (btnOpenBatch) {
-    btnOpenBatch.addEventListener('click', async () => {
-      try {
-        await apiFetch('/api/task-import/unhide', { method: 'POST' });
-      } catch (e) {}
-      const navItem = document.getElementById('navItemBatchImport');
-      if (navItem) navItem.style.display = 'flex';
-      switchView('batchImport');
-    });
+  // Динамический рендеринг расширений плагинов в карточке настроек
+  const extContainer = document.getElementById('settingsPluginExtensions');
+  if (extContainer && window.Sentinel && window.Sentinel.ui) {
+    window.Sentinel.ui.renderExtensionPoints('settings:view', extContainer);
   }
 }
 

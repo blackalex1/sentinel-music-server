@@ -33,11 +33,8 @@ export function renderUploadTracksModal() {
           <input type="file" id="uploadFileInput" multiple accept=".mp3,.flac,.m4a,.wav,.ogg,audio/*" style="display: none;" />
         </div>
 
-        <div style="margin-top: 10px; text-align: center;">
-          <button type="button" id="btnOpenBatchFromUploadModal" style="background: none; border: none; font-size: 0.8rem; color: var(--primary); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 4px;">
-            ${icon('download', { size: 14 })} <span>Открыть отчет пакетного скачивания</span>
-          </button>
-        </div>
+        <!-- Точка расширения для плагинов -->
+        <div id="uploadModalPluginExtensions"></div>
 
         <!-- Список выбранных файлов -->
         <div id="uploadSelectedSection" class="upload-selected-section" style="display: none;">

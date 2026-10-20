@@ -161,6 +161,9 @@ app.include_router(api_router, prefix="/api")
 # Монтирование модульных интерфейсов плагинов (/plugins/<name>/...)
 plugin_manager.mount_plugin_assets(app)
 
+# Динамическое монтирование API роутеров активных плагинов
+plugin_manager.mount_plugin_routers(app)
+
 # Подключение фронтенда (Web / Tauri WebView)
 frontend_dir = os.path.join(os.path.dirname(__file__), "frontend")
 if os.path.exists(frontend_dir):

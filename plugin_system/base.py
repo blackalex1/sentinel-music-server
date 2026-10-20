@@ -81,3 +81,58 @@ class BasePlugin(ABC):
         Возвращает (is_synced: bool, lines: list, raw_text: str).
         """
         return False, [], ""
+
+    # ==========================================
+    # Коннекторы API и расширений функционала
+    # ==========================================
+
+    def get_router(self) -> Optional[Any]:
+        """
+        Возвращает FastAPI APIRouter плагина (если плагин предоставляет собственные эндпоинты API).
+        Роутер автоматически подключается ядром через PluginManager.
+        """
+        return None
+
+    def can_handle_candidate(self, candidate_id: str) -> bool:
+        """
+        Проверяет, относится ли данный ID кандидата к этому плагину.
+        """
+        return False
+
+    def resolve_candidate(self, candidate_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Восстанавливает структуру кандидата по ID (при устаревании кэша в оперативной памяти).
+        """
+        return None
+
+    def can_preview_candidate(self, candidate: Dict[str, Any]) -> bool:
+        """
+        Определяет, поддерживает ли данный кандидат предпрослушивание аудио.
+        """
+        return True
+
+    def get_preview_headers(self, candidate: Dict[str, Any]) -> Dict[str, str]:
+        """
+        Возвращает HTTP заголовки для обхода анти-хотлинка при предпрослушивании (Referer, Cookie и др.).
+        """
+        return {}
+
+    async def get_preview_stream(self, candidate: Dict[str, Any], range_header: Optional[str] = None) -> Optional[Any]:
+        """
+        Возвращает StreamingResponse или генератор байт для предпрослушивания аудиопотока.
+        Плагин сам инкапсулирует обход анти-хотлинка (Referer, Cookie, User-Agent) без хардкода в ядре.
+        """
+        return None
+
+    async def backfill_covers(self, db: Any, limit: int = 50) -> Dict[str, Any]:
+        """
+        Пакетное фоновое заполнение обложек треков (если поддерживается плагином).
+        """
+        return {"supported": False}
+
+    def clear_cover_cache(self, track_id: int) -> bool:
+        """
+        Сброс кэша обложки для указанного трека.
+        """
+        return False
+

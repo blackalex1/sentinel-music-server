@@ -65,7 +65,7 @@ def test_covers_refresh(client, sample_track, auth_headers):
 
 def test_covers_backfill(client, auth_headers, monkeypatch):
     """Проверяет вызов пакетного заполнения обложек."""
-    import plugins.cover_art.plugin as cap_module
+    cap_module = pytest.importorskip("plugins.cover_art.plugin")
     monkeypatch.setattr(cap_module, "fetch_online_cover", lambda artist, title: (None, None, None))
     res = client.post("/api/covers/backfill?limit=5", headers=auth_headers)
     assert res.status_code in (200, 503)

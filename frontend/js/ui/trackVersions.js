@@ -1,3 +1,25 @@
+
+function updateDynamicFilterChips(candidates) {
+  const container = document.getElementById('dynamicSourceFilterChips');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const sources = Array.from(new Set((candidates || []).map(c => (c.source || '').trim()).filter(Boolean)));
+  sources.forEach(src => {
+    const chip = document.createElement('button');
+    chip.className = 'version-filter-chip';
+    chip.dataset.filter = `source:${src}`;
+    const label = src.toLowerCase() === 'p2p' ? 'P2P' : (src.charAt(0).toUpperCase() + src.slice(1));
+    chip.textContent = label;
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.version-filter-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      currentCandidateFilter = chip.dataset.filter;
+      renderCandidateList(currentCandidates, currentCandidateFilter);
+    });
+    container.appendChild(chip);
+  });
+}
 /**
  * Модуль выбора альтернативных версий трека (Не та версия / Заменить).
  */
@@ -47,6 +69,7 @@ export async function openTrackVersionModal(track) {
   try {
     const data = await fetchTrackCandidates(track.id, 10);
     currentCandidates = (data && data.candidates) ? data.candidates : [];
+    updateDynamicFilterChips(currentCandidates);
     renderCandidateList(currentCandidates, currentCandidateFilter);
   } catch (err) {
     candidatesList.innerHTML = `
@@ -70,13 +93,12 @@ function renderCandidateList(candidates, filter = 'all') {
     const fmt = (c.format || '').toLowerCase();
     const src = (c.source || '').toLowerCase();
     if (filter === 'flac') return fmt === 'flac' || vType.includes('flac');
-    if (filter === 'p2p') return src === 'p2p';
-    if (filter === 'source_a') return src === 'source_a';
-    if (filter === 'source_as') return src === 'source_as';
-    if (filter === 'source_c') return src === 'source_c';
-    if (filter === 'source_d') return src === 'source_d';
     if (filter === 'explicit') return c.explicit || vType.includes('explicit');
     if (filter === 'remix') return vType.includes('remix') || vType.includes('slowed') || vType.includes('speed');
+    if (filter.startsWith('source:')) {
+      return src === filter.slice(7).toLowerCase();
+    }
+    if (src === filter.toLowerCase()) return true;
     return true;
   });
 

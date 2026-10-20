@@ -18,13 +18,9 @@ export function renderTrackVersionsModal() {
         <div class="version-filter-chips" id="versionFilterChips">
           <button class="version-filter-chip active" data-filter="all">Все</button>
           <button class="version-filter-chip" data-filter="flac">FLAC Lossless</button>
-          <button class="version-filter-chip" data-filter="p2p">P2P</button>
-          <button class="version-filter-chip" data-filter="source_a">SourceA</button>
-          <button class="version-filter-chip" data-filter="source_as">SourceAs</button>
-          <button class="version-filter-chip" data-filter="source_c">Source C</button>
-          <button class="version-filter-chip" data-filter="source_d">Source D</button>
           <button class="version-filter-chip" data-filter="explicit">18+ Explicit</button>
           <button class="version-filter-chip" data-filter="remix">Remix / Edit</button>
+          <span id="dynamicSourceFilterChips" style="display: contents;"></span>
         </div>
 
         <div class="candidates-scroll-area" id="candidatesList">

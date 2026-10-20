@@ -24,8 +24,6 @@ if (typeof window !== 'undefined') {
  */
 export function isCandidatePreviewSupported(candidate) {
   if (!candidate) return false;
-  const src = (candidate.source || '').toLowerCase();
-  if (src === 'p2p') return false;
   if (candidate.can_preview === false) return false;
   return true;
 }

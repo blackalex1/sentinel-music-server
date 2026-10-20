@@ -4,6 +4,7 @@
  * и монтирует их скрипты и стили без хардкода в ядре.
  */
 import { apiFetch } from './api.js';
+import { Sentinel } from './pluginConnector.js';
 
 const loadedPlugins = new Map();
 
@@ -27,13 +28,11 @@ export async function loadFrontendPlugins() {
         document.head.appendChild(link);
       }
 
-      // 2. Динамический импорт JS модуля плагина
+      // 2. Динамический импорт JS модуля плагина с передачей Sentinel SDK
       try {
         const module = await import(p.ui_entry);
         if (typeof module.init === 'function') {
-          module.init();
-        } else if (typeof module.initHybridSearchPlugin === 'function') {
-          module.initHybridSearchPlugin();
+          module.init(Sentinel);
         }
         loadedPlugins.set(p.name, module);
         console.log(`[PluginLoader] UI плагин «${p.name}» v${p.version} успешно активирован`);

@@ -133,6 +133,24 @@ class PluginManager:
                     app.mount(mount_path, StaticFiles(directory=ui_dir), name=f"plugin_ui_{item}")
                     print(f"[PluginManager] Смонтирован UI плагина: {item} -> {mount_path}")
 
+    def mount_plugin_routers(self, app) -> int:
+        """
+        Автоматически монтирует API роутеры всех активных плагинов в приложение FastAPI.
+        Позволяет плагинам предоставлять собственные HTTP эндпоинты без изменения ядра.
+        """
+        mounted = 0
+        for p in self.plugins:
+            if p.enabled and hasattr(p, "get_router"):
+                try:
+                    router = p.get_router()
+                    if router:
+                        app.include_router(router)
+                        mounted += 1
+                        print(f"[PluginManager] Смонтирован API роутер плагина: {p.name}")
+                except Exception as e:
+                    print(f"[PluginManager] Ошибка монтирования роутера плагина {p.name}: {e}")
+        return mounted
+
     async def startup(self, context: Dict[str, Any]) -> None:
         """Оповещает все плагины о запуске сервера."""
         for p in self.plugins:
@@ -313,6 +331,103 @@ class PluginManager:
             if p.name.lower() == name.lower():
                 return p
         return None
+
+    def resolve_candidate(self, candidate_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Восстанавливает информацию о кандидате через плагины, если запись устарела в кэше.
+        Устраняет необходимость жесткого кодирования префиксов ID в ядре.
+        """
+        for p in self.plugins:
+            if p.enabled and hasattr(p, "can_handle_candidate"):
+                try:
+                    if p.can_handle_candidate(candidate_id):
+                        cand = p.resolve_candidate(candidate_id)
+                        if cand:
+                            if "plugin_name" not in cand:
+                                cand["plugin_name"] = p.name
+                            return cand
+                except Exception as e:
+                    print(f"[PluginManager] Ошибка в resolve_candidate плагина {p.name}: {e}")
+        return None
+
+    def can_preview_candidate(self, candidate: Dict[str, Any]) -> bool:
+        """
+        Проверяет, поддерживает ли плагин кандидата предпрослушивание аудио.
+        """
+        target_plugin = candidate.get("plugin_name", "")
+        target_source = candidate.get("source", "").lower()
+
+        for p in self.plugins:
+            if p.name == target_plugin or (target_source and target_source in p.name.lower()):
+                if hasattr(p, "can_preview_candidate"):
+                    try:
+                        return p.can_preview_candidate(candidate)
+                    except Exception as e:
+                        print(f"[PluginManager] Ошибка в can_preview_candidate плагина {p.name}: {e}")
+        return candidate.get("can_preview", True)
+
+    def get_candidate_preview_headers(self, candidate: Dict[str, Any]) -> Dict[str, str]:
+        """
+        Запрашивает у плагина заголовки запроса для обхода анти-хотлинка при предпрослушивании.
+        """
+        target_plugin = candidate.get("plugin_name", "")
+        target_source = candidate.get("source", "").lower()
+
+        for p in self.plugins:
+            if p.name == target_plugin or (target_source and target_source in p.name.lower()):
+                if hasattr(p, "get_preview_headers"):
+                    try:
+                        return p.get_preview_headers(candidate)
+                    except Exception as e:
+                        print(f"[PluginManager] Ошибка в get_preview_headers плагина {p.name}: {e}")
+        return {}
+
+    async def get_candidate_preview_stream(self, candidate: Dict[str, Any], range_header: Optional[str] = None) -> Optional[Any]:
+        """
+        Запрашивает у плагина потоковое воспроизведение для предпрослушивания.
+        Плагин сам инкапсулирует анти-хотлинк и сетевые заголовки.
+        """
+        target_plugin = candidate.get("plugin_name", "")
+        target_source = candidate.get("source", "").lower()
+
+        for p in self.plugins:
+            if p.name == target_plugin or (target_source and target_source in p.name.lower()):
+                if hasattr(p, "get_preview_stream"):
+                    try:
+                        stream = await p.get_preview_stream(candidate, range_header=range_header)
+                        if stream is not None:
+                            return stream
+                    except Exception as e:
+                        print(f"[PluginManager] Ошибка в get_preview_stream плагина {p.name}: {e}")
+        return None
+
+    async def backfill_covers(self, db: Any, limit: int = 50) -> Dict[str, Any]:
+        """
+        Делегирует пакетное заполнение обложек плагину обложек без привязки к его конкретному имени.
+        """
+        for p in self.plugins:
+            if p.enabled and hasattr(p, "backfill_covers"):
+                try:
+                    res = await p.backfill_covers(db, limit=limit)
+                    if res and not res.get("supported") is False:
+                        return res
+                except Exception as e:
+                    print(f"[PluginManager] Ошибка в backfill_covers плагина {p.name}: {e}")
+        return {"status": "no_provider", "message": "Плагин автоматического заполнения обложек не активен"}
+
+    def clear_cover_cache(self, track_id: int) -> bool:
+        """
+        Очищает дисковый кэш обложки трека через плагины обложек.
+        """
+        cleared = False
+        for p in self.plugins:
+            if p.enabled and hasattr(p, "clear_cover_cache"):
+                try:
+                    if p.clear_cover_cache(track_id):
+                        cleared = True
+                except Exception as e:
+                    print(f"[PluginManager] Ошибка в clear_cover_cache плагина {p.name}: {e}")
+        return cleared
 
 
 # Глобальный синглтон менеджера плагинов
