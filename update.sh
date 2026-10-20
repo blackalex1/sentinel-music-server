@@ -34,7 +34,8 @@ pull_updates() {
     # 1. Проверяем доступность официального GitHub (таймаут 4 сек)
     if run_with_timeout 4 git ls-remote "$origin_url" HEAD &>/dev/null; then
         echo "✅ Связь с GitHub стабильна. Скачивание обновлений..."
-        git pull origin "$branch"
+        git fetch origin "$branch"
+        git reset --hard "origin/$branch"
         return 0
     fi
 
@@ -55,7 +56,7 @@ pull_updates() {
         echo "   -> Проверка зеркала: $host ..."
         if run_with_timeout 4 git ls-remote "$mirror" HEAD &>/dev/null; then
             echo "   ✅ Зеркало $host доступно! Загрузка обновлений..."
-            if git pull "$mirror" "$branch"; then
+            if git fetch "$mirror" "$branch" && git reset --hard FETCH_HEAD; then
                 success=1
                 break
             fi
