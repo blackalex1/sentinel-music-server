@@ -319,6 +319,61 @@ body.login-page {
   letter-spacing: var(--tracking-normal);
 }
 
+/* Настройка хоста сервера */
+.login-server-host {
+  margin-top: 18px;
+  text-align: center;
+}
+
+.btn-toggle-server {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.btn-toggle-server:hover {
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.server-host-form {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.form-input-sm {
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  flex: 1;
+}
+
+.btn-save-host {
+  padding: 8px 16px;
+  background: var(--primary);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-md);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity var(--transition-fast);
+  white-space: nowrap;
+}
+
+.btn-save-host:hover {
+  opacity: 0.9;
+}
+
 /* Адаптивность для мобильных экранов */
 @media (max-width: 480px) {
   .login-card {

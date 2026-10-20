@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Автономный буфер Потока (Discovery Buffer)
     STREAM_BUFFER_SIZE: int = int(os.getenv("STREAM_BUFFER_SIZE", "10"))
 
+    # Секретный ключ для криптографии, подписи и AES-256-GCM шифрования
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "sentinel-music-master-secret-key-32-bytes")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

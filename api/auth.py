@@ -25,7 +25,9 @@ from core.security import (
     generate_session_token,
     get_current_user,
     get_current_admin_user,
-    get_current_user_optional
+    get_current_user_optional,
+    create_encrypted_token,
+    decrypt_encrypted_token
 )
 
 router = APIRouter(prefix="/auth", tags=["Аутентификация"])
@@ -462,7 +464,12 @@ def logout_user(
         raw_token = token.strip()
 
     if raw_token:
-        s = db.query(SessionToken).filter(SessionToken.token == raw_token).first()
+        lookup_token = raw_token
+        if raw_token.startswith("enc:v1:"):
+            decrypted = decrypt_encrypted_token(raw_token)
+            if decrypted:
+                lookup_token = decrypted
+        s = db.query(SessionToken).filter(SessionToken.token == lookup_token).first()
         if s:
             db.delete(s)
             db.commit()
@@ -523,11 +530,16 @@ def get_qr_code(
         s = db.query(SessionToken).filter(SessionToken.user_id == current_user.id).first()
         token_str = s.token if s else generate_session_token()
 
+    # Защита сопряжения через современный аутентифицированный шифр AES-256-GCM
+    enc_token = create_encrypted_token(
+        session_token=token_str,
+        username=current_user.username,
+        user_id=current_user.id
+    )
+
     payload_data = {
         "url": server_url,
-        "token": token_str,
-        "username": current_user.username,
-        "is_admin": current_user.is_admin
+        "token": enc_token
     }
     payload_json = json.dumps(payload_data, separators=(",", ":"))
 
@@ -541,8 +553,8 @@ def get_qr_code(
         "status": "ok",
         "server_url": server_url,
         "token": token_str,
+        "encrypted_token": enc_token,
         "username": current_user.username,
-        "is_admin": current_user.is_admin,
         "payload": payload_data,
         "payload_json": payload_json,
         "qr_image": b64_img,

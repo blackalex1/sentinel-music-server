@@ -2,10 +2,14 @@ import os
 import hmac
 import hashlib
 import secrets
+import json
+import base64
 from typing import Optional, Tuple
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import Header, Query, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from core.config import settings
 from database.db import get_db
 from database.models import User, SessionToken
 
@@ -41,6 +45,55 @@ def generate_session_token() -> str:
     return secrets.token_urlsafe(32)
 
 
+def get_cipher_key() -> bytes:
+    """Получает 256-битный ключ для AES-256-GCM из SECRET_KEY."""
+    key_material = getattr(settings, "SECRET_KEY", None) or os.getenv("SECRET_KEY", "sentinel-music-crypto-secret-key-32")
+    return hashlib.sha256(key_material.encode("utf-8")).digest()
+
+
+def create_encrypted_token(session_token: str, username: str, user_id: int) -> str:
+    """
+    Создает криптографически защищенный и аутентифицированный токен на базе AES-256-GCM.
+    Включает 96-битный случайный nonce и 128-битную метку аутентификации (integrity tag).
+    Любая попытка модификации токена приводит к ошибке InvalidTag при расшифровке.
+    """
+    key = get_cipher_key()
+    aesgcm = AESGCM(key)
+    nonce = os.urandom(12)  # 96-битный nonce
+    payload = {
+        "t": session_token,
+        "u": username,
+        "uid": user_id
+    }
+    plaintext = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+    ciphertext = aesgcm.encrypt(nonce, plaintext, None)
+    raw_blob = nonce + ciphertext
+    return "enc:v1:" + base64.urlsafe_b64encode(raw_blob).decode('ascii')
+
+
+def decrypt_encrypted_token(enc_token_str: str) -> Optional[str]:
+    """
+    Расшифровывает и проверяет аутентичность крипто-токена AES-256-GCM.
+    Возвращает underlying session_token при успехе, либо None при нарушении целостности.
+    """
+    if not enc_token_str or not enc_token_str.startswith("enc:v1:"):
+        return None
+    raw_b64 = enc_token_str[len("enc:v1:"):]
+    try:
+        raw_blob = base64.urlsafe_b64decode(raw_b64.encode('ascii'))
+        if len(raw_blob) < 12 + 16:  # 12 байт nonce + 16 байт tag
+            return None
+        nonce = raw_blob[:12]
+        ciphertext = raw_blob[12:]
+        key = get_cipher_key()
+        aesgcm = AESGCM(key)
+        decrypted_bytes = aesgcm.decrypt(nonce, ciphertext, None)
+        payload = json.loads(decrypted_bytes.decode('utf-8'))
+        return payload.get("t")
+    except Exception:
+        return None
+
+
 def get_current_user(
     authorization: Optional[str] = Header(None),
     token: Optional[str] = Query(None),
@@ -51,6 +104,7 @@ def get_current_user(
     Проверяет токен:
     1. В заголовке: Authorization: Bearer <token>
     2. В query-параметре: ?token=<token> (необходимо для <audio> и ExoPlayer стриминга)
+    Поддерживает как классические токены, так и криптографически зашифрованные токены AES-256-GCM (enc:v1:).
     """
     extracted_token = None
 
@@ -65,6 +119,17 @@ def get_current_user(
             detail="Необходима авторизация (отсутствует токен доступа)",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Если токен зашифрован через AES-256-GCM — расшифровываем и проверяем аутентичность
+    if extracted_token.startswith("enc:v1:"):
+        decrypted_session_token = decrypt_encrypted_token(extracted_token)
+        if not decrypted_session_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Недействительный или поврежденный крипто-токен (нарушена целостность шифра)",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        extracted_token = decrypted_session_token
 
     # Ищем активную сессию в базе данных
     session_record = db.query(SessionToken).filter(SessionToken.token == extracted_token).first()
@@ -150,7 +215,6 @@ def is_safe_track_file_path(file_path: Optional[str]) -> bool:
     if any(abs_path.startswith(p) for p in dangerous_prefixes):
         return False
 
-    from core.config import settings
     import tempfile
 
     music_dir = os.path.realpath(os.path.abspath(settings.MUSIC_DIR)).lower()
@@ -165,5 +229,3 @@ def is_safe_track_file_path(file_path: Optional[str]) -> bool:
         return False
 
     return False
-
-
