@@ -23,6 +23,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: music-server
+    env_file:
+      - .env
     restart: unless-stopped
     depends_on:
       postgres:
