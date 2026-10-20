@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from database.db import get_db, SessionLocal
-from database.models import User, UserReaction
+from database.models import User, UserReaction, Track
 from recommendations.vibe_engine import VibeEngine
 from recommendations.analyzer import library_analyzer
 from recommendations.discovery import discovery_engine
@@ -210,4 +210,36 @@ def get_stream_buffer_status(
             "total_history": len(records)
         },
         "history_file": os.path.basename(discovery_buffer_manager.history_json_path)
+    }
+
+
+@router.get("/stream/capability")
+def get_stream_capability(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Проверяет возможности сервера для работы режима «Поток»:
+    - Наличие установленных плагинов скачивания/импорта музыки.
+    - Общее количество треков в фонотеке.
+    - Доступность фоллбэка на превью Deezer.
+    """
+    from plugin_system.base import BasePlugin
+
+    ingestion_plugins = []
+    for p in plugin_manager.plugins:
+        if getattr(p, "enabled", False) and "batch" not in p.name.lower():
+            import_method = getattr(p, "on_track_import_request", None)
+            if import_method and getattr(import_method, "__func__", None) is not BasePlugin.on_track_import_request:
+                ingestion_plugins.append(p.name)
+
+    has_ingestion = len(ingestion_plugins) > 0
+    total_tracks = db.query(Track).count()
+
+    return {
+        "has_ingestion_plugins": has_ingestion,
+        "ingestion_plugins": ingestion_plugins,
+        "library_tracks_count": total_tracks,
+        "preview_fallback": True,
+        "status": "full" if has_ingestion else "preview_mode"
     }

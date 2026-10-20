@@ -52,6 +52,15 @@ export function renderStreamView() {
           Музыка подстраивается под ваш ритм, вкусы и реакции в реальном времени
         </p>
 
+        <!-- Предупреждение об отсутствии плагинов скачивания -->
+        <div class="stream-plugin-warning" id="streamPluginWarning" style="display: none;">
+          <span class="stream-warning-icon">${icon('alert', { size: 20 })}</span>
+          <div class="stream-warning-content">
+            <span class="stream-warning-title">Плагины для скачивания музыки не установлены</span>
+            <span class="stream-warning-text">Новые треки будут воспроизводиться в 30-секундном демо-режиме (Deezer Previews). Для автоматического сохранения полных треков включите плагин скачивания (например, SLSKD).</span>
+          </div>
+        </div>
+
         <!-- Кнопка запуска Потока на основе текущего трека медиатеки -->
         <div class="stream-seed-wrapper" id="streamSeedWrapper" style="display: none;">
           <button type="button" class="btn-start-stream-from-track" id="btnStartStreamFromTrack">

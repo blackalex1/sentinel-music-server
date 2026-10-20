@@ -5,15 +5,31 @@
  */
 
 import { state, updateState, onStateChange } from './state.js';
-import { fetchStreamNext, fetchAnalyticsStatus, startAnalytics, sendReaction } from './api.js';
+import { fetchStreamNext, fetchStreamCapability, fetchAnalyticsStatus, startAnalytics, sendReaction } from './api.js';
 import { API_BASE } from './config.js';
 import { playTrack, togglePlay } from './player.js';
 import { icon } from './icons.js';
 import { toggleLikeAction, toggleDislikeAction } from './ui/reactions.js';
-import { showToast } from './ui/toast.js';
+import { showToast, escapeHtml } from './ui/toast.js';
 
 let isLoadingStreamTrack = false;
 let analyticsPollingTimer = null;
+let streamCapability = null;
+
+export async function checkStreamCapability() {
+  try {
+    const data = await fetchStreamCapability();
+    if (data) {
+      streamCapability = data;
+      const warningEl = document.getElementById('streamPluginWarning');
+      if (warningEl) {
+        warningEl.style.display = !data.has_ingestion_plugins ? 'flex' : 'none';
+      }
+    }
+  } catch (err) {
+    console.warn('Не удалось проверить возможности Потока:', err);
+  }
+}
 
 export function initStream() {
   // Слушаем запрос следующего трека от плеера
@@ -41,6 +57,7 @@ export function initStream() {
     if (view === 'stream') {
       updateStreamStatusUI();
       updateOrbUI(state.isPlaying);
+      checkStreamCapability();
     }
   });
 
@@ -114,6 +131,7 @@ export function initStream() {
 
   // Первичная синхронизация состояния интерфейса
   updateStreamStatusUI();
+  checkStreamCapability();
 }
 
 /**
@@ -436,11 +454,19 @@ export function updateStreamStatusUI() {
     if (npActions) npActions.style.display = 'flex';
 
     if (track) {
-      if (npTitle) npTitle.textContent = track.title;
+      const isDemo = !!(track.is_preview || (track.id < 0) || (track.preview_url && (!track.file_path || track.file_path.startsWith('http'))));
+      if (npTitle) {
+        if (isDemo) {
+          npTitle.innerHTML = `${escapeHtml(track.title)} <span class="stream-preview-badge" title="30-секундное демо Deezer">Демо 30с</span>`;
+        } else {
+          npTitle.textContent = track.title;
+        }
+      }
       if (npArtist) npArtist.textContent = track.artist;
       if (heroSubtitle) {
+        const demoNote = isDemo ? ' [30с Демо]' : '';
         const discoveryReason = track.discovery_reason ? ` • ${track.discovery_reason}` : '';
-        heroSubtitle.textContent = `В Потоке: ${track.artist} — ${track.title}${discoveryReason}`;
+        heroSubtitle.textContent = `В Потоке: ${track.artist} — ${track.title}${demoNote}${discoveryReason}`;
       }
 
       const coverUrl = track.cover_url || (track.id ? `${API_BASE}/api/covers/${track.id}` : '');
@@ -470,16 +496,24 @@ export function updateStreamStatusUI() {
 
     if (track) {
       // Обычный трек из медиатеки
+      const isDemo = !!(track.is_preview || (track.id < 0) || (track.preview_url && (!track.file_path || track.file_path.startsWith('http'))));
       if (heroSubtitle) {
-        heroSubtitle.textContent = `Играет из медиатеки: ${track.artist} — ${track.title}`;
+        const demoNote = isDemo ? ' [30с Демо]' : '';
+        heroSubtitle.textContent = `Играет: ${track.artist} — ${track.title}${demoNote}`;
       }
       if (seedWrapper) seedWrapper.style.display = 'flex';
       if (seedBtnLabel) {
         seedBtnLabel.textContent = `Запустить Поток на основе «${track.title}»`;
       }
 
-      if (npTitle) npTitle.textContent = track.title;
-      if (npArtist) npArtist.textContent = `${track.artist} (Медиатека)`;
+      if (npTitle) {
+        if (isDemo) {
+          npTitle.innerHTML = `${escapeHtml(track.title)} <span class="stream-preview-badge" title="30-секундное демо Deezer">Демо 30с</span>`;
+        } else {
+          npTitle.textContent = track.title;
+        }
+      }
+      if (npArtist) npArtist.textContent = isDemo ? `${track.artist} (Deezer Preview)` : `${track.artist} (Медиатека)`;
       if (npActions) npActions.style.display = 'none'; // Скрываем кнопки стрим-пропуска для обычного трека
 
       const coverUrl = track.cover_url || (track.id ? `${API_BASE}/api/covers/${track.id}` : '');

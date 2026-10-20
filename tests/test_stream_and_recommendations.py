@@ -206,3 +206,41 @@ def test_library_analyzer_worker_progress(db_session):
             assert refreshed.energy is not None
             assert refreshed.valence is not None
             assert refreshed.loudness_lufs is not None
+
+
+def test_stream_capability_and_preview_fallback(client, auth_headers, db_session, monkeypatch):
+    """Проверяет эндпоинт /api/stream/capability и отдачу 30с Deezer демо при отсутствии плагинов скачивания."""
+    from plugin_system.manager import plugin_manager
+    from recommendations.discovery import discovery_engine
+
+    # 1. Проверяем эндпоинт capability
+    res = client.get("/api/stream/capability", headers=auth_headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert "has_ingestion_plugins" in data
+    assert "library_tracks_count" in data
+    assert data["preview_fallback"] is True
+
+    # 2. Мокаем отсутствие плагинов скачивания
+    monkeypatch.setattr(plugin_manager, "has_ingestion_plugins", lambda: False)
+
+    # Заполняем кэш кандидатов Deezer с отрицательными ID
+    discovery_engine._cache_candidates = [
+        {
+            "id": -1001,
+            "title": "Deezer Demo Track",
+            "artist": "Deezer Artist",
+            "duration": 30.0,
+            "preview_url": "https://cdns-preview.deezer.com/stream.mp3",
+            "file_path": "https://cdns-preview.deezer.com/stream.mp3",
+            "is_discovery": True,
+            "discovery_reason": "Top Hits"
+        }
+    ]
+
+    cand = discovery_engine.get_discovery_candidate(db_session, allow_preview_fallback=True)
+    assert cand is not None
+    assert cand["id"] == -1001
+    assert cand["is_preview"] is True
+    assert "30с демо" in cand["discovery_reason"]
+    assert cand["preview_url"] == "https://cdns-preview.deezer.com/stream.mp3"

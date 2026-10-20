@@ -119,6 +119,11 @@ class VibeEngine:
                 fb_query = fb_query.filter(Track.id != current_track_id)
             candidates = fb_query.order_by(func.random()).limit(100).all()
             if not candidates:
+                cand_discovery = discovery_engine.get_discovery_candidate(
+                    self.db, mood=active_mood, session_factory=self.session_factory, allow_preview_fallback=True
+                )
+                if cand_discovery:
+                    return cand_discovery
                 return None
 
         current_track = (

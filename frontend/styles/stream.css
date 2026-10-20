@@ -1139,3 +1139,65 @@
 .stream-header-badge.stream-idle .stream-badge-pulse {
   display: none !important;
 }
+
+/* Предупреждение об отсутствии плагинов для скачивания */
+.stream-plugin-warning {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  backdrop-filter: var(--blur-modal);
+  -webkit-backdrop-filter: var(--blur-modal);
+  border-radius: var(--radius-lg);
+  padding: 12px 20px;
+  max-width: 680px;
+  margin: 16px auto 20px auto;
+  text-align: left;
+  z-index: 5;
+  box-shadow: 0 4px 20px rgba(245, 158, 11, 0.15);
+  animation: fadeIn 0.3s ease;
+}
+
+.stream-warning-icon {
+  color: #f59e0b;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.stream-warning-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.stream-warning-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #fbbf24;
+}
+
+.stream-warning-text {
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* Бейдж демо-режима для трека Потока */
+.stream-preview-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(245, 158, 11, 0.22);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  color: #fbbf24;
+  vertical-align: middle;
+  margin-left: 8px;
+}

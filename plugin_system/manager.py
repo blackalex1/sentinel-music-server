@@ -209,6 +209,16 @@ class PluginManager:
                 print(f"[PluginManager] Ошибка в on_track_import_request плагина {p.name}: {e}")
         return False
 
+    def has_ingestion_plugins(self) -> bool:
+        """Проверяет наличие активных плагинов для скачивания/импорта музыки."""
+        from plugin_system.base import BasePlugin
+        for p in self.plugins:
+            if getattr(p, "enabled", False) and "batch" not in p.name.lower():
+                import_method = getattr(p, "on_track_import_request", None)
+                if import_method and getattr(import_method, "__func__", None) is not BasePlugin.on_track_import_request:
+                    return True
+        return False
+
     async def search_all_candidates(self, artist: str, title: str, limit_per_source: int = 5, limit: int = None) -> List[Dict[str, Any]]:
         """
         Параллельно опрашивает все активные плагины через asyncio.gather

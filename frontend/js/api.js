@@ -175,6 +175,12 @@ export async function fetchStreamNext(optionsOrCurrentTrackId = null, moodEnergy
   return res.json();
 }
 
+export async function fetchStreamCapability() {
+  const res = await apiFetch('/api/stream/capability');
+  if (!res.ok) return null;
+  return res.json();
+}
+
 export async function fetchAnalyticsStatus() {
   const res = await apiFetch('/api/stream/analytics/status');
   if (!res.ok) return null;
