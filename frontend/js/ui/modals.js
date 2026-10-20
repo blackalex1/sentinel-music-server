@@ -221,24 +221,75 @@ export function setupModals() {
     btnCloseQrModalAction.addEventListener('click', () => hideQrModal());
   }
 
-  if (btnCopyQrPayload && qrPayloadInput) {
-    btnCopyQrPayload.addEventListener('click', () => {
-      if (qrPayloadInput.value) {
-        navigator.clipboard.writeText(qrPayloadInput.value).then(() => {
-          showToast('Строка сопряжения скопирована', 'checkCircle');
-        }).catch(() => {
-          qrPayloadInput.select();
-          document.execCommand('copy');
-          showToast('Скопировано', 'checkCircle');
-        });
+  async function performCopyQrPayload() {
+    if (!qrPayloadInput || !qrPayloadInput.value) return;
+    const text = qrPayloadInput.value;
+    let copied = false;
+
+    // 1. Попытка через Clipboard API (работает в безопасном HTTPS-контексте)
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch (_) {
+        copied = false;
       }
-    });
+    }
+
+    // 2. Надежный fallback для HTTP (локальная сеть LAN, http://192.168.1.X)
+    if (!copied) {
+      try {
+        qrPayloadInput.focus();
+        qrPayloadInput.select();
+        if (typeof qrPayloadInput.setSelectionRange === 'function') {
+          qrPayloadInput.setSelectionRange(0, 99999);
+        }
+        copied = document.execCommand('copy');
+      } catch (err) {
+        console.warn('[QR Copy] Fallback execCommand failed:', err);
+      }
+    }
+
+    // 3. Fallback через временный textarea, если input не сработал
+    if (!copied) {
+      try {
+        const temp = document.createElement('textarea');
+        temp.value = text;
+        temp.style.position = 'fixed';
+        temp.style.top = '-9999px';
+        temp.style.left = '-9999px';
+        temp.style.opacity = '0';
+        document.body.appendChild(temp);
+        temp.focus();
+        temp.select();
+        temp.setSelectionRange(0, 99999);
+        copied = document.execCommand('copy');
+        document.body.removeChild(temp);
+      } catch (_) {}
+    }
+
+    if (copied) {
+      showToast('Строка сопряжения скопирована', 'checkCircle');
+      const btnText = document.getElementById('btnCopyQrPayloadText');
+      if (btnCopyQrPayload) {
+        btnCopyQrPayload.classList.add('copied');
+        if (btnText) btnText.textContent = 'Скопировано!';
+        setTimeout(() => {
+          btnCopyQrPayload.classList.remove('copied');
+          if (btnText) btnText.textContent = 'Копировать';
+        }, 2000);
+      }
+    } else {
+      showToast('Выделите текст и нажмите Ctrl+C', 'alert');
+    }
+  }
+
+  if (btnCopyQrPayload) {
+    btnCopyQrPayload.addEventListener('click', () => performCopyQrPayload());
   }
 
   if (qrPayloadInput) {
-    qrPayloadInput.addEventListener('click', () => {
-      qrPayloadInput.select();
-    });
+    qrPayloadInput.addEventListener('click', () => performCopyQrPayload());
   }
 
   if (btnRefreshQr) {

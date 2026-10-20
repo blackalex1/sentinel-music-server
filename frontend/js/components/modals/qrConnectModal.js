@@ -43,13 +43,13 @@ export function renderQrConnectModal() {
 
         <!-- Данные для ручного ввода / копирования -->
         <div style="margin-bottom: 14px; text-align: left;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
             <label class="form-label" style="font-size: 0.72rem; margin: 0;">Строка сопряжения (JSON / Токен):</label>
-            <button type="button" class="btn-icon" id="btnCopyQrPayload" title="Скопировать строку" style="padding: 2px 6px; font-size: 0.75rem; color: #8a2be2; display: flex; align-items: center; gap: 4px;">
-              ${icon('copy', { size: 13 })} <span>Копировать</span>
+            <button type="button" class="btn-copy-payload" id="btnCopyQrPayload" title="Скопировать строку в буфер обмена">
+              ${icon('copy', { size: 13 })} <span id="btnCopyQrPayloadText">Копировать</span>
             </button>
           </div>
-          <input type="text" id="qrPayloadInput" readonly class="form-input" style="padding: 6px 10px; font-size: 0.76rem; background: rgba(0, 0, 0, 0.4); color: #aaaaaa; cursor: pointer; text-overflow: ellipsis;" title="Нажмите, чтобы скопировать">
+          <input type="text" id="qrPayloadInput" readonly class="form-input" style="padding: 8px 12px; font-size: 0.78rem; font-family: monospace; background: rgba(0, 0, 0, 0.45); color: #e2e8f0; border: 1px solid rgba(139, 92, 246, 0.25); cursor: pointer; text-overflow: ellipsis;" title="Нажмите, чтобы скопировать">
         </div>
 
         <!-- Инструкция -->
