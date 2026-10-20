@@ -90,9 +90,18 @@ if command -v docker &> /dev/null; then
 
     echo "=========================================="
     echo " ✅ Sentinel Music Server успешно запущен!"
-    echo " 📡 Потоковый вывод логов в реальном времени (Ctrl+C для выхода):"
-    echo "=========================================="
-    $COMPOSE_CMD logs -f --tail=30 music-server
+    if [[ "$*" == *"--no-logs"* ]] || [[ "$*" == *"-n"* ]]; then
+        echo " 📊 Логи контейнера:"
+        $COMPOSE_CMD logs --tail=20 music-server
+    elif [ -t 1 ]; then
+        echo " 📡 Потоковый вывод логов в реальном времени (Ctrl+C для выхода):"
+        echo "=========================================="
+        $COMPOSE_CMD logs -f --tail=30 music-server
+    else
+        echo " 📊 Последние логи сервиса:"
+        echo "=========================================="
+        $COMPOSE_CMD logs --tail=30 music-server
+    fi
 else
     echo "⚠️ Docker не найден. Файлы репозитория обновлены."
 fi
