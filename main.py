@@ -60,8 +60,9 @@ async def lifespan(app: FastAPI):
         with SessionLocal() as db:
             bootstrap_admin_user(db, credentials_path=credentials_file)
 
-    count = plugin_manager.load_plugins()
-    print(f"[Server] Активно расширений и плагинов: {count}")
+    if not plugin_manager.plugins:
+        plugin_manager.load_plugins()
+    print(f"[Server] Активно расширений и плагинов: {len(plugin_manager.plugins)}")
     await plugin_manager.startup({"engine": engine})
 
     if settings.WATCHDOG_ENABLED and os.path.exists(settings.MUSIC_DIR):
@@ -158,10 +159,9 @@ async def add_security_headers(request, call_next):
 # Подключение модульного API роутера
 app.include_router(api_router, prefix="/api")
 
-# Монтирование модульных интерфейсов плагинов (/plugins/<name>/...)
+# Загрузка плагинов и монтирование их ассетов и API роутеров
+plugin_manager.load_plugins()
 plugin_manager.mount_plugin_assets(app)
-
-# Динамическое монтирование API роутеров активных плагинов
 plugin_manager.mount_plugin_routers(app)
 
 # Подключение фронтенда (Web / Tauri WebView)
