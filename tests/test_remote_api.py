@@ -44,6 +44,35 @@ def test_remote_status_endpoint(client, auth_headers):
     assert "last_playback_session" in data
 
 
+def test_remote_status_with_device_id_filtering(client, auth_user_and_token):
+    """Проверка, что передача device_id исключает текущий телефон из pc_device."""
+    user, token = auth_user_and_token
+    # Добавляем телефон как подключенное hybrid-устройство
+    phone = ConnectedDevice(
+        websocket=None,
+        device_id="phone_abc_123",
+        name="Android Phone",
+        device_type="hybrid",
+        user_id=user.id
+    )
+    remote_manager._connections[user.id]["phone_abc_123"] = phone
+
+    try:
+        # Запрос с указанием своего device_id
+        res = client.get(
+            "/api/remote/status?device_id=phone_abc_123",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        assert res.status_code == 200
+        data = res.json()
+        # Телефон не должен считаться онлайн-ПК
+        if data["pc_device"]:
+            assert data["pc_device"]["id"] != "phone_abc_123"
+    finally:
+        if user.id in remote_manager._connections and "phone_abc_123" in remote_manager._connections[user.id]:
+            del remote_manager._connections[user.id]["phone_abc_123"]
+
+
 def test_remote_devices_endpoint(client, auth_headers):
     """Проверка REST-эндпоинта списка устройств /api/remote/devices."""
     res = client.get("/api/remote/devices", headers=auth_headers)

@@ -5,7 +5,7 @@
  */
 
 import { state, updateState } from './state.js';
-import { API_BASE, getAuthToken, isTauri } from './config.js';
+import { getApiBase, getAuthToken, isTauri } from './config.js';
 import {
   playTrack,
   togglePlay,
@@ -14,7 +14,9 @@ import {
   seekTime,
   setVolume,
   toggleShuffle,
+  setShuffle,
   toggleRepeat,
+  setRepeatMode,
   toggleMute,
   toggleLoudnessNormalization,
   updatePlayButtonsUI,
@@ -22,11 +24,13 @@ import {
   updateTimelineUI,
   savePlaybackSession
 } from './player.js';
+import { syncTrackReactionUI } from './ui/reactions.js';
 import { audioFx } from './audioFx.js';
 import { syncEqualizerUI } from './ui/equalizer.js';
 
 let ws = null;
 let reconnectTimer = null;
+let pingIntervalTimer = null;
 let lastProgressBroadcast = 0;
 let isConnected = false;
 let isApplyingRemoteState = false;
@@ -77,8 +81,9 @@ export function initRemoteConnect() {
   const deviceId = getOrCreateDeviceId();
   const deviceName = getDeviceName();
 
-  // Преобразуем HTTP URL сервера в WS URL
-  let wsUrl = API_BASE.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
+  // Преобразуем динамический HTTP URL сервера в WS URL
+  const base = getApiBase().replace(/\/+$/, '');
+  let wsUrl = base.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
   wsUrl += `/api/remote/ws?token=${encodeURIComponent(token)}&device_id=${encodeURIComponent(deviceId)}&device_name=${encodeURIComponent(deviceName)}&device_type=player`;
 
   try {
@@ -89,24 +94,40 @@ export function initRemoteConnect() {
       console.log(`[Sentinel Connect] Подключено к серверу как плеер: ${deviceName} (${deviceId})`);
       updateConnectIndicatorUI(true);
 
+      // Запуск периодического heartbeat ping раз в 15 секунд для удержания соединения
+      if (pingIntervalTimer) clearInterval(pingIntervalTimer);
+      pingIntervalTimer = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send(JSON.stringify({ action: 'ping' }));
+          } catch (_) {}
+        }
+      }, 15000);
+
       const audio = document.getElementById('audioElement');
       if (audio && !audio._remoteListenersAttached) {
         audio._remoteListenersAttached = true;
-        audio.addEventListener('play', () => broadcastCurrentState(true));
-        audio.addEventListener('pause', () => {
-          if (!isApplyingRemoteState) {
-            broadcastCurrentState(true);
-          }
+        audio.addEventListener('play', () => {
+          if (!isApplyingRemoteState) broadcastCurrentState(true);
         });
-        audio.addEventListener('seeked', () => broadcastCurrentState(true));
-        audio.addEventListener('timeupdate', () => broadcastCurrentState(false));
+        audio.addEventListener('pause', () => {
+          if (!isApplyingRemoteState) broadcastCurrentState(true);
+        });
+        audio.addEventListener('seeked', () => {
+          if (!isApplyingRemoteState) broadcastCurrentState(true);
+        });
+        audio.addEventListener('timeupdate', () => {
+          if (!isApplyingRemoteState) broadcastCurrentState(false);
+        });
       }
       if (!window._remoteTrackListenerAttached) {
         window._remoteTrackListenerAttached = true;
-        window.addEventListener('track:changed', () => broadcastCurrentState(true));
+        window.addEventListener('track:changed', () => {
+          if (!isApplyingRemoteState) broadcastCurrentState(true);
+        });
       }
 
-      // Сразу отправляем текущее состояние
+      // Немедленно отправляем текущее состояние воспроизведения
       broadcastCurrentState(true);
     };
 
@@ -121,13 +142,17 @@ export function initRemoteConnect() {
 
     ws.onclose = () => {
       isConnected = false;
+      if (pingIntervalTimer) {
+        clearInterval(pingIntervalTimer);
+        pingIntervalTimer = null;
+      }
       updateConnectIndicatorUI(false);
       scheduleReconnect();
     };
 
     ws.onerror = (err) => {
       console.warn('[Sentinel Connect] Ошибка сокета:', err);
-      ws.close();
+      try { ws.close(); } catch (_) {}
     };
   } catch (e) {
     console.error('[Sentinel Connect] Не удалось открыть WebSocket:', e);
@@ -156,14 +181,7 @@ function handleIncomingMessage(msg) {
     case 'welcome':
       console.log(`[Sentinel Connect] Зарегистрирован в сети. Доступных устройств:`, msg.devices?.length || 0);
       if (Array.isArray(msg.devices)) {
-        const activePlayingDevice = msg.devices.find(d => d.id !== getOrCreateDeviceId() && (d.is_playing || d.current_track));
-        if (activePlayingDevice && activePlayingDevice.current_track) {
-          const audio = document.getElementById('audioElement');
-          if (audio && audio.paused) {
-            console.log(`[Sentinel Connect] Найдено активное устройство (${activePlayingDevice.name}), синхронизируем состояние`);
-            handleRemoteDeviceState(activePlayingDevice.id, activePlayingDevice);
-          }
-        }
+        window.dispatchEvent(new CustomEvent('sentinel:devices-changed', { detail: msg.devices }));
       }
       break;
 
@@ -176,7 +194,9 @@ function handleIncomingMessage(msg) {
       break;
 
     case 'device_state':
-      handleRemoteDeviceState(msg.device_id, msg.device);
+      // ПК является конечным плеером (player), поэтому входящее состояние других устройств
+      // не должно самовольно сбрасывать локальный трек и очередь.
+      // Сохраняем информацию об устройствах для UI при необходимости.
       break;
 
     case 'pong':
@@ -185,176 +205,195 @@ function handleIncomingMessage(msg) {
 }
 
 /**
- * Выполняет команду, пришедшую с телефона (Play, Pause, Next, Seek, Volume...).
+ * Выполняет команду, пришедшую со смартфона (Play, Pause, Next, Prev, Seek, Volume...).
  */
 function executeRemoteCommand(command, payload = {}, fromDeviceId = '') {
   const audio = document.getElementById('audioElement');
   console.log(`[Sentinel Connect] Получена удаленная команда: ${command}`, payload);
 
   let toastText = null;
+  isApplyingRemoteState = true;
 
-  switch (command) {
-    case 'PLAY':
-      if (audio && audio.paused) {
-        audio.play().catch(() => {});
+  try {
+    switch (command) {
+      case 'PLAY': {
+        const hasValidSource = audio && audio.src && audio.src !== window.location.href && !audio.src.endsWith('/null');
+        if (!hasValidSource) {
+          if (state.currentTrack) {
+            playTrack(state.currentTrack, state.queue, false, true, state.currentTime || 0);
+          } else if (state.tracks && state.tracks.length > 0) {
+            playTrack(state.tracks[0], state.tracks, false, true, 0);
+          }
+        } else if (audio.paused) {
+          audio.play().catch(e => {
+            console.warn('[Sentinel Connect] Ошибка запуска аудио:', e);
+            if (state.currentTrack) {
+              playTrack(state.currentTrack, state.queue, false, true, state.currentTime || 0);
+            }
+          });
+        }
+        updateState('isPlaying', true);
+        updatePlayButtonsUI(true);
         toastText = 'Воспроизведение запущено с телефона';
+        break;
       }
-      break;
 
-    case 'PAUSE':
-      if (audio && !audio.paused) {
-        audio.pause();
+      case 'PAUSE': {
+        if (audio && !audio.paused) {
+          audio.pause();
+        }
+        updateState('isPlaying', false);
+        updatePlayButtonsUI(false);
         toastText = 'Пауза с телефона';
+        break;
       }
-      break;
 
-    case 'TOGGLE_PLAY':
-      togglePlay();
-      break;
-
-    case 'NEXT':
-      nextTrack();
-      toastText = 'Следующий трек (с телефона)';
-      break;
-
-    case 'PREV':
-      prevTrack();
-      toastText = 'Предыдущий трек (с телефона)';
-      break;
-
-    case 'SEEK':
-      if (payload.position_seconds !== undefined) {
-        seekTime(Number(payload.position_seconds));
-      } else if (payload.position_ms !== undefined) {
-        seekTime(Number(payload.position_ms) / 1000.0);
+      case 'TOGGLE_PLAY': {
+        if (audio && !audio.paused) {
+          audio.pause();
+          updateState('isPlaying', false);
+          updatePlayButtonsUI(false);
+          toastText = 'Пауза с телефона';
+        } else {
+          const hasValidSource = audio && audio.src && audio.src !== window.location.href && !audio.src.endsWith('/null');
+          if (!hasValidSource) {
+            if (state.currentTrack) {
+              playTrack(state.currentTrack, state.queue, false, true, state.currentTime || 0);
+            } else if (state.tracks && state.tracks.length > 0) {
+              playTrack(state.tracks[0], state.tracks, false, true, 0);
+            }
+          } else {
+            audio.play().catch(e => {
+              console.warn('[Sentinel Connect] Ошибка запуска аудио при toggle:', e);
+              if (state.currentTrack) {
+                playTrack(state.currentTrack, state.queue, false, true, state.currentTime || 0);
+              }
+            });
+          }
+          updateState('isPlaying', true);
+          updatePlayButtonsUI(true);
+          toastText = 'Воспроизведение запущено с телефона';
+        }
+        break;
       }
-      break;
 
-    case 'SET_VOLUME':
-      if (payload.volume !== undefined) {
-        setVolume(Number(payload.volume));
+      case 'NEXT': {
+        nextTrack();
+        toastText = 'Следующий трек (с телефона)';
+        break;
       }
-      break;
 
-    case 'MUTE':
-      toggleMute();
-      break;
+      case 'PREV': {
+        prevTrack();
+        toastText = 'Предыдущий трек (с телефона)';
+        break;
+      }
 
-    case 'PREPARE_TRACK':
-    case 'TRANSFER_PLAYBACK':
-    case 'PLAY_TRACK':
-      if (payload.track) {
-        const isTransfer = (command === 'PREPARE_TRACK' || command === 'TRANSFER_PLAYBACK');
-        const autoPlay = payload.auto_play !== undefined 
-          ? Boolean(payload.auto_play) 
-          : !isTransfer;
+      case 'SEEK': {
         const posSec = (payload.position_seconds !== undefined)
           ? Number(payload.position_seconds)
           : ((payload.position_ms !== undefined) ? Number(payload.position_ms) / 1000.0 : 0);
-
-        playTrack(payload.track, payload.queue || null, false, autoPlay, posSec);
-        toastText = autoPlay
-          ? `Удаленный запуск: ${payload.track.artist} - ${payload.track.title}`
-          : `Передано с телефона: ${payload.track.artist} - ${payload.track.title}`;
-
-        setTimeout(() => {
-          isApplyingRemoteState = false;
-          broadcastCurrentState(true);
-        }, 150);
+        seekTime(posSec);
+        break;
       }
-      break;
 
-    case 'SHUFFLE':
-      toggleShuffle();
-      break;
-
-    case 'REPEAT':
-      toggleRepeat();
-      break;
-
-    case 'SET_EQUALIZER':
-      if (payload.enabled !== undefined) audioFx.setEnabled(Boolean(payload.enabled));
-      if (payload.preset) audioFx.setPreset(payload.preset);
-      if (payload.band_index !== undefined && payload.level_db !== undefined) {
-        audioFx.setBandLevel(Number(payload.band_index), Number(payload.level_db));
-      }
-      if (Array.isArray(payload.bands)) {
-        payload.bands.forEach((lvl, idx) => audioFx.setBandLevel(idx, Number(lvl)));
-      }
-      if (payload.bass_boost !== undefined) audioFx.setBassBoost(Number(payload.bass_boost));
-      if (payload.reset) audioFx.resetToFlat();
-      try { syncEqualizerUI(); } catch (_) {}
-      toastText = 'Эквалайзер изменен с телефона';
-      break;
-
-    case 'SET_LIMITER':
-      if (payload.mode) audioFx.setLimiterMode(payload.mode);
-      if (payload.loudness_enabled !== undefined) {
-        const targetState = Boolean(payload.loudness_enabled);
-        if (targetState !== Boolean(state.isLoudnessNormalization)) {
-          toggleLoudnessNormalization();
+      case 'SET_VOLUME': {
+        if (payload.volume !== undefined) {
+          setVolume(Number(payload.volume));
         }
+        break;
       }
-      try { syncEqualizerUI(); } catch (_) {}
-      toastText = 'Лимитер изменен с телефона';
-      break;
-  }
 
-  if (toastText) {
-    window.dispatchEvent(new CustomEvent('app:toast', { detail: `📱 ${toastText}` }));
-  }
-
-  // Немедленно синхронизируем новое состояние обратно
-  setTimeout(broadcastCurrentState, 50);
-}
-
-/**
- * Обрабатывает обновление состояния воспроизведения с другого устройства (например, со смартфона).
- * Если на ПК в этот момент не играет звук, синхронизирует отображение активного трека,
- * прогресса, обложки и очереди без автовоспроизведения на ПК.
- */
-function handleRemoteDeviceState(deviceId, device) {
-  if (!device || !device.current_track) return;
-  if (deviceId === getOrCreateDeviceId()) return;
-
-  const audio = document.getElementById('audioElement');
-  // Если на ПК прямо сейчас активно воспроизводится локальный звук — не перебиваем его
-  if (audio && !audio.paused) {
-    return;
-  }
-
-  const remoteTrack = device.current_track;
-  const posSec = (device.position_ms || 0) / 1000.0;
-  const durSec = (device.duration_ms || (remoteTrack.duration ? remoteTrack.duration * 1000 : 0)) / 1000.0;
-
-  const isDifferentTrack = !state.currentTrack || state.currentTrack.id !== remoteTrack.id;
-
-  isApplyingRemoteState = true;
-  try {
-    if (isDifferentTrack) {
-      console.log(`[Sentinel Connect] Синхронизация трека с ${device.name || 'устройства'}:`, remoteTrack.title);
-      const remoteQueue = Array.isArray(device.queue) && device.queue.length > 0 ? device.queue : null;
-      // Подготавливаем трек на ПК без автозапуска звука
-      playTrack(remoteTrack, remoteQueue, false, false, posSec);
-    } else {
-      // Тот же трек — плавно обновляем позицию на шкале воспроизведения
-      updateState('currentTime', posSec);
-      if (durSec > 0) {
-        updateState('duration', durSec);
+      case 'MUTE': {
+        toggleMute();
+        break;
       }
-      updateTimelineUI();
-      if (audio && Math.abs(audio.currentTime - posSec) > 2) {
-        try {
-          audio.currentTime = posSec;
-        } catch (_) {}
+
+      case 'PREPARE_TRACK':
+      case 'TRANSFER_PLAYBACK':
+      case 'PLAY_TRACK': {
+        if (payload.track) {
+          const isTransfer = (command === 'PREPARE_TRACK' || command === 'TRANSFER_PLAYBACK');
+          const autoPlay = payload.auto_play !== undefined 
+            ? Boolean(payload.auto_play) 
+            : !isTransfer;
+          const posSec = (payload.position_seconds !== undefined)
+            ? Number(payload.position_seconds)
+            : ((payload.position_ms !== undefined) ? Number(payload.position_ms) / 1000.0 : 0);
+
+          playTrack(payload.track, payload.queue || null, false, autoPlay, posSec);
+          toastText = autoPlay
+            ? `Удаленный запуск: ${payload.track.artist} - ${payload.track.title}`
+            : `Передано с телефона: ${payload.track.artist} - ${payload.track.title}`;
+        }
+        break;
+      }
+
+      case 'SHUFFLE': {
+        if (payload.is_shuffle !== undefined) {
+          setShuffle(Boolean(payload.is_shuffle));
+        } else {
+          toggleShuffle();
+        }
+        break;
+      }
+
+      case 'REPEAT': {
+        if (payload.repeat_mode) {
+          setRepeatMode(payload.repeat_mode);
+        } else {
+          toggleRepeat();
+        }
+        break;
+      }
+
+      case 'SET_REACTION': {
+        if (payload.track_id !== undefined) {
+          syncTrackReactionUI(Number(payload.track_id), Boolean(payload.is_liked), Boolean(payload.is_disliked));
+        }
+        break;
+      }
+
+      case 'SET_EQUALIZER': {
+        if (payload.enabled !== undefined) audioFx.setEnabled(Boolean(payload.enabled));
+        if (payload.preset) audioFx.setPreset(payload.preset);
+        if (payload.band_index !== undefined && payload.level_db !== undefined) {
+          audioFx.setBandLevel(Number(payload.band_index), Number(payload.level_db));
+        }
+        if (Array.isArray(payload.bands)) {
+          payload.bands.forEach((lvl, idx) => audioFx.setBandLevel(idx, Number(lvl)));
+        }
+        if (payload.bass_boost !== undefined) audioFx.setBassBoost(Number(payload.bass_boost));
+        if (payload.reset) audioFx.resetToFlat();
+        try { syncEqualizerUI(); } catch (_) {}
+        toastText = 'Эквалайзер изменен с телефона';
+        break;
+      }
+
+      case 'SET_LIMITER': {
+        if (payload.mode) audioFx.setLimiterMode(payload.mode);
+        if (payload.loudness_enabled !== undefined) {
+          const targetState = Boolean(payload.loudness_enabled);
+          if (targetState !== Boolean(state.isLoudnessNormalization)) {
+            toggleLoudnessNormalization();
+          }
+        }
+        try { syncEqualizerUI(); } catch (_) {}
+        toastText = 'Лимитер изменен с телефона';
+        break;
       }
     }
   } catch (err) {
-    console.warn('[Sentinel Connect] Ошибка применения удаленного состояния:', err);
+    console.error('[Sentinel Connect] Ошибка обработки команды:', err);
   } finally {
+    if (toastText) {
+      window.dispatchEvent(new CustomEvent('app:toast', { detail: `📱 ${toastText}` }));
+    }
+    // Даем аудио-стеку применить изменения и отправляем обновленный статус с force = true
     setTimeout(() => {
       isApplyingRemoteState = false;
-    }, 300);
+      broadcastCurrentState(true);
+    }, 80);
   }
 }
 
@@ -439,6 +478,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('player:state-change', () => broadcastCurrentState(true));
   window.addEventListener('player:track-change', () => broadcastCurrentState(true));
   window.addEventListener('loudness:changed', () => broadcastCurrentState(true));
+  window.addEventListener('online', () => initRemoteConnect());
 
   // Слушаем изменения эквалайзера и лимитеров в реальном времени
   try {

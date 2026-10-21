@@ -7,7 +7,7 @@
  */
 
 import { state, updateState, onStateChange } from './state.js';
-import { API_BASE } from './config.js';
+import { getApiBase } from './config.js';
 import {
   formatTime,
   playQueueTrackAt,
@@ -190,7 +190,7 @@ function renderNowPlayingCard() {
   const isFlac = (track.audio_format || '').toLowerCase() === 'flac';
 
   container.innerHTML = `
-    <img class="queue-now-playing-cover" src="${API_BASE}/api/covers/${track.id}" alt="" onerror="this.style.opacity='0.2'" />
+    <img class="queue-now-playing-cover" src="${getApiBase()}/api/covers/${track.id}" alt="" onerror="this.style.opacity='0.2'" />
     <div class="queue-now-playing-info">
       <div class="queue-track-title-line">
         <span class="queue-track-title">${escapeHtml(track.title)}</span>
@@ -247,7 +247,7 @@ function renderUpcomingList() {
     item.className = 'queue-item';
     item.innerHTML = `
       <span class="queue-item-index">${relIdx + 1}</span>
-      <img class="queue-item-cover" src="${API_BASE}/api/covers/${track.id}" alt="" onerror="this.style.opacity='0.2'" />
+      <img class="queue-item-cover" src="${getApiBase()}/api/covers/${track.id}" alt="" onerror="this.style.opacity='0.2'" />
       <div class="queue-item-details">
         <div class="queue-track-title-line">
           <span class="queue-item-title">${escapeHtml(track.title)}</span>
@@ -329,7 +329,7 @@ function renderHistoryList() {
     item.className = 'queue-item history-item';
     item.innerHTML = `
       <span class="queue-item-play-btn" title="Слушать повторно">${icon('play', { size: 14 })}</span>
-      <img class="queue-item-cover" src="${API_BASE}/api/covers/${track.id}" alt="" onerror="this.style.opacity='0.2'" />
+      <img class="queue-item-cover" src="${getApiBase()}/api/covers/${track.id}" alt="" onerror="this.style.opacity='0.2'" />
       <div class="queue-item-details">
         <div class="queue-track-title-line">
           <span class="queue-item-title">${escapeHtml(track.title)}</span>

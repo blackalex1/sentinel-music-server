@@ -6,7 +6,7 @@
 
 import { state, updateState, onStateChange } from './state.js';
 import { fetchStreamNext, fetchStreamCapability, fetchAnalyticsStatus, startAnalytics, sendReaction } from './api.js';
-import { API_BASE } from './config.js';
+import { getApiBase } from './config.js';
 import { playTrack, togglePlay } from './player.js';
 import { icon } from './icons.js';
 import { toggleLikeAction, toggleDislikeAction } from './ui/reactions.js';
@@ -482,7 +482,7 @@ export function updateStreamStatusUI() {
         heroSubtitle.textContent = `В Потоке: ${track.artist} — ${track.title}${demoNote}${discoveryReason}`;
       }
 
-      const coverUrl = track.cover_url || (track.id ? `${API_BASE}/api/covers/${track.id}` : '');
+      const coverUrl = track.cover_url || (track.id ? `${getApiBase()}/api/covers/${track.id}` : '');
       if (npCover) {
         if (coverUrl) {
           npCover.src = coverUrl;

@@ -5,7 +5,7 @@
  */
 
 import { state, updateState, onStateChange } from './state.js';
-import { API_BASE } from './config.js';
+import { getApiBase } from './config.js';
 import { fetchLyrics } from './api.js';
 import { seekTime } from './player.js';
 
@@ -110,7 +110,7 @@ function updateLyricsOverlayTrackInfo(track) {
   if (headerTitle) headerTitle.textContent = track.title || 'Трек не выбран';
   if (headerArtist) headerArtist.textContent = track.artist || 'Sentinel Music';
 
-  const coverUrl = track.cover_url || (track.id ? `${API_BASE}/api/covers/${track.id}` : '');
+  const coverUrl = track.cover_url || (track.id ? `${getApiBase()}/api/covers/${track.id}` : '');
 
   if (headerCover) {
     if (coverUrl) {

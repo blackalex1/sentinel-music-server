@@ -226,6 +226,7 @@ class RemoteCommandRequest(BaseModel):
 
 @router.get("/status")
 async def get_remote_status(
+    device_id: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -236,8 +237,15 @@ async def get_remote_status(
     3. Возвращает данные об устройстве для предложения выбора воспроизведения на клиенте.
     """
     online_devices = remote_manager.get_user_devices(current_user.id)
-    # Находим онлайн-плеер (ПК / Desktop / Браузер)
-    online_pc = next((d for d in online_devices if d.get("can_play")), None)
+    # Исключаем устройство, отправляющее запрос (например, текущий телефон)
+    candidate_devices = [d for d in online_devices if not (device_id and d.get("id") == device_id)]
+
+    # Находим онлайн-плеер (ПК / Desktop / Браузер), приоритет отдается dedicated плеерам
+    online_pc = next((d for d in candidate_devices if d.get("type") == "player"), None)
+    if not online_pc:
+        online_pc = next((d for d in candidate_devices if any(k in (d.get("name") or "").lower() for k in ["компьютер", "desktop", "пк", "pc", "web", "windows", "linux", "mac"])), None)
+    if not online_pc:
+        online_pc = next((d for d in candidate_devices if d.get("can_play")), None)
 
     # Ищем в базе сохраненных устройств
     known_pcs = db.query(UserDevice).filter(
@@ -378,8 +386,9 @@ async def remote_websocket_endpoint(
     if origin:
         import re
         from main import cors_origins
+        # Разрешаем локальные IP (включая 100.x Tailscale), localhost, tauri://, *.localhost, а также проверенные CORS-источники
         is_allowed = (origin in cors_origins) or bool(
-            re.match(r"^(https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|([a-z0-9-]+\.)?localhost)(:\d+)?|tauri://localhost)$", origin)
+            re.match(r"^(https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|100\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+|([a-z0-9-]+\.)?localhost)(:\d+)?|(tauri|https?)://([a-z0-9-]+\.)*localhost(:\d+)?)$", origin)
         )
         if not is_allowed:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)

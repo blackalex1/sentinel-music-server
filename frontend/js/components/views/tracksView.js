@@ -23,6 +23,9 @@ export function renderTracksView() {
         </div>
       </div>
 
+      <!-- Вкладки поиска: В фонотеке / В сети -->
+      <div id="searchTabsBar" class="search-tabs-bar" style="display: none;"></div>
+
       <!-- Фильтры настроения коллекции: только Бодрое, Спокойное, Радостное, Грустное -->
       <div class="tracks-mood-bar" id="tracksMoodBar">
         <button class="tracks-mood-chip active" data-mood="all" id="chipTrackMoodAll">
@@ -42,9 +45,8 @@ export function renderTracksView() {
         </button>
       </div>
       
-      <!-- Контейнеры для подключаемого плагина поиска (Hybrid Search Tabs & Results) -->
-      <div id="hybridSearchTabsBar" class="hybrid-search-tabs" style="display: none;"></div>
-      <div id="hybridSearchPluginView" class="hybrid-plugin-view" style="display: none;"></div>
+      <!-- Результаты онлайн-поиска по внешним источникам -->
+      <div id="searchCandidatesView" class="search-candidates-view" style="display: none;"></div>
       
       <div class="track-table-container" id="tracksTableContainer">
         <!-- Таблица треков -->

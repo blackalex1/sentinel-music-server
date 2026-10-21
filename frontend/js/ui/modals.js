@@ -4,7 +4,7 @@
 
 import { state, updateState } from '../state.js';
 import { apiFetch, apiLogin, apiRegister, createPlaylist, addTrackToPlaylist, deleteTrack, uploadTrackFiles, fetchQrCode, fetchQrHosts } from '../api.js';
-import { setAuthToken, getServerHost, setServerHost, API_BASE } from '../config.js';
+import { setAuthToken, getServerHost, setServerHost, getApiBase, API_BASE } from '../config.js';
 import { showToast, escapeHtml } from './toast.js';
 import { handleTrackDeleted } from '../player.js';
 import { loadLibraryTracks } from './trackList.js';
@@ -599,7 +599,7 @@ export function openDeleteTrackModal(track, onDeleted = null) {
 
   if (!modal) return;
 
-  if (coverEl) coverEl.src = `${API_BASE}/api/covers/${track.id}`;
+  if (coverEl) coverEl.src = `${getApiBase()}/api/covers/${track.id}`;
   if (titleEl) titleEl.textContent = track.title || 'Без названия';
   if (artistEl) artistEl.textContent = track.artist || 'Неизвестный исполнитель';
   if (checkbox) checkbox.checked = true;

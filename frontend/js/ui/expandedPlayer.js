@@ -5,7 +5,7 @@
  */
 
 import { state, updateState, onStateChange } from '../state.js';
-import { API_BASE } from '../config.js';
+import { getApiBase } from '../config.js';
 import {
   togglePlay,
   nextTrack,
@@ -243,7 +243,7 @@ function updateExpandedTrackInfo(track) {
   if (artistEl) artistEl.textContent = track.artist || 'Sentinel Music';
   if (albumEl) albumEl.textContent = track.album ? `Альбом: ${track.album}` : '';
 
-  const coverUrl = track.cover_url || (track.id ? `${API_BASE}/api/covers/${track.id}` : '');
+  const coverUrl = track.cover_url || (track.id ? `${getApiBase()}/api/covers/${track.id}` : '');
 
   if (coverImg) {
     if (coverUrl) {

@@ -3,7 +3,7 @@
  */
 
 import { state, updateState } from './state.js';
-import { API_BASE, getAuthToken } from './config.js';
+import { getApiBase, getAuthToken } from './config.js';
 import { sendReaction, fetchShuffleTracks } from './api.js';
 import { icon } from './icons.js';
 import { syncTrackReactionUI } from './ui/reactions.js';
@@ -369,9 +369,10 @@ export function playTrack(track, queueList = null, isStream = false, autoPlay = 
 
   const token = getAuthToken();
   const isPreview = track.preview_url || (track.id < 0 && track.file_path && track.file_path.startsWith('http'));
+  const base = getApiBase();
   const streamUrl = isPreview
     ? (track.preview_url || track.file_path)
-    : `${API_BASE}/api/stream/${track.id}${token ? `?token=${token}` : ''}`;
+    : `${base}/api/stream/${track.id}${token ? `?token=${token}` : ''}`;
 
   audio.src = streamUrl;
 
@@ -426,12 +427,21 @@ export function playTrack(track, queueList = null, isStream = false, autoPlay = 
 }
 
 export function togglePlay() {
+  if ((!audio.src || audio.src === window.location.href || audio.src.endsWith('/null')) && state.currentTrack) {
+    playTrack(state.currentTrack, state.queue, false, true, state.currentTime || 0);
+    return;
+  }
   if (!audio.src && state.tracks.length > 0) {
     playTrack(state.tracks[0], state.tracks);
     return;
   }
   if (audio.paused) {
-    audio.play().catch(() => {});
+    audio.play().catch((e) => {
+      console.warn('[Player] Ошибка запуска воспроизведения:', e);
+      if (state.currentTrack) {
+        playTrack(state.currentTrack, state.queue, false, true, state.currentTime || 0);
+      }
+    });
   } else {
     audio.pause();
   }
@@ -512,8 +522,14 @@ export function seekPercentage(pct) {
 }
 
 export function seekTime(seconds) {
-  if (!audio) return;
-  audio.currentTime = seconds;
+  const target = Math.max(0, Number(seconds) || 0);
+  updateState('currentTime', target);
+  updateTimelineUI();
+  if (audio) {
+    try {
+      audio.currentTime = target;
+    } catch (_) {}
+  }
 }
 
 export function setVolume(val) {
@@ -563,6 +579,12 @@ export function toggleMute() {
   if (expFill) expFill.style.width = nextMuted ? '0%' : `${state.volume * 100}%`;
 }
 
+export async function setShuffle(enabled) {
+  const target = Boolean(enabled);
+  if (state.isShuffle === target) return;
+  await toggleShuffle();
+}
+
 export async function toggleShuffle() {
   const next = !state.isShuffle;
   updateState('isShuffle', next);
@@ -610,20 +632,25 @@ export async function playShuffleTracks(mood = null) {
   }
 }
 
+export function setRepeatMode(mode) {
+  const valid = ['off', 'all', 'one'].includes(mode) ? mode : 'off';
+  updateState('repeatMode', valid);
+  try {
+    localStorage.setItem('sentinel_repeat_mode', valid);
+  } catch (_) {}
+  const btn = document.getElementById('btnRepeat');
+  if (btn) {
+    btn.classList.toggle('active', valid !== 'off');
+    btn.innerHTML = valid === 'one' ? icon('repeatOne', { size: 17 }) : icon('repeat', { size: 17 });
+  }
+  savePlaybackSession(true);
+}
+
 export function toggleRepeat() {
   const modes = ['off', 'all', 'one'];
   const cur = modes.indexOf(state.repeatMode);
   const next = modes[(cur + 1) % modes.length];
-  updateState('repeatMode', next);
-  try {
-    localStorage.setItem('sentinel_repeat_mode', next);
-  } catch (_) {}
-  const btn = document.getElementById('btnRepeat');
-  if (btn) {
-    btn.classList.toggle('active', next !== 'off');
-    btn.innerHTML = next === 'one' ? icon('repeatOne', { size: 17 }) : icon('repeat', { size: 17 });
-  }
-  savePlaybackSession(true);
+  setRepeatMode(next);
 }
 
 function onTrackEnded() {
@@ -703,7 +730,7 @@ export function updateTrackInfoUI(track) {
     if (track.cover_url) {
       cover.src = track.cover_url;
     } else {
-      cover.src = `${API_BASE}/api/covers/${track.id}`;
+      cover.src = `${getApiBase()}/api/covers/${track.id}`;
     }
     cover.style.display = 'block';
   }
@@ -718,7 +745,7 @@ function setupMediaSession(track) {
       title: track.title,
       artist: track.artist,
       album: track.album || 'Фонотека',
-      artwork: [{ src: `${API_BASE}/api/covers/${track.id}`, sizes: '512x512', type: 'image/jpeg' }]
+      artwork: [{ src: `${getApiBase()}/api/covers/${track.id}`, sizes: '512x512', type: 'image/jpeg' }]
     });
 
     navigator.mediaSession.setActionHandler('play', togglePlay);

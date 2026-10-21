@@ -2,7 +2,7 @@
  * Модуль предпрослушивания треков-кандидатов из подключенных плагинов.
  */
 
-import { API_BASE, getAuthToken } from './config.js';
+import { API_BASE, getServerHost, getAuthToken } from './config.js';
 import { icon } from './icons.js';
 
 let previewAudio = null;
@@ -77,7 +77,8 @@ export function toggleCandidatePreview(candidate, buttonEl, cardEl) {
   } catch (_) {}
 
   const token = getAuthToken();
-  const streamUrl = `${API_BASE}/api/tracks/candidates/preview?candidate_id=${encodeURIComponent(candidate.candidate_id)}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+  const base = (typeof getServerHost === "function" ? getServerHost() : null) || API_BASE;
+  const streamUrl = `${base}/api/tracks/candidates/preview?candidate_id=${encodeURIComponent(candidate.candidate_id)}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
 
   currentPreviewCandidateId = candidate.candidate_id;
   currentPreviewButton = buttonEl;

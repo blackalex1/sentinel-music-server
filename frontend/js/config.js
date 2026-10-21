@@ -8,10 +8,22 @@ export const isTauri = typeof window !== 'undefined' && (
   (window.location && (window.location.origin.includes('tauri') || window.location.protocol === 'tauri:' || window.location.origin.includes('1420')))
 );
 
-// Динамическое определение базового адреса API (без хардкода IP)
-export const API_BASE = (!isTauri && typeof window !== 'undefined' && window.location && window.location.origin && window.location.protocol.startsWith('http'))
-  ? window.location.origin
-  : (localStorage.getItem('music_server_host') || 'http://localhost:8000');
+/**
+ * Возвращает актуальный базовый адрес API сервера без завершающего слэша.
+ */
+export function getApiBase() {
+  const host = (!isTauri && typeof window !== 'undefined' && window.location && window.location.origin && window.location.protocol.startsWith('http'))
+    ? window.location.origin
+    : (localStorage.getItem('music_server_host') || 'http://localhost:8000');
+  return (host || 'http://localhost:8000').trim().replace(/\/+$/, '');
+}
+
+export function getServerHost() {
+  return getApiBase();
+}
+
+// Экспортируем API_BASE для совместимости, вычисляя актуальное значение
+export const API_BASE = getApiBase();
 
 export function setServerHost(host) {
   let cleaned = host.trim().replace(/\/+$/, '');
@@ -19,12 +31,6 @@ export function setServerHost(host) {
     cleaned = 'http://' + cleaned;
   }
   localStorage.setItem('music_server_host', cleaned);
-}
-
-export function getServerHost() {
-  return (!isTauri && typeof window !== 'undefined' && window.location && window.location.origin && window.location.protocol.startsWith('http'))
-    ? window.location.origin
-    : (localStorage.getItem('music_server_host') || 'http://localhost:8000');
 }
 
 export function getAuthToken() {

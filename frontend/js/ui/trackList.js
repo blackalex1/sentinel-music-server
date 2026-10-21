@@ -5,7 +5,7 @@
 import { state, updateState } from '../state.js';
 import { fetchTracks, fetchTracksCount, fetchRecentTracks, sendReaction } from '../api.js';
 import { playTrack, formatTime, playShuffleTracks } from '../player.js';
-import { API_BASE } from '../config.js';
+import { getApiBase } from '../config.js';
 import { showToast, escapeHtml } from './toast.js';
 import { openTrackContextMenu } from './contextMenu.js';
 import { updatePlayerReactionsUI } from './playerControls.js';
@@ -379,7 +379,7 @@ export function appendTrackRowsElements(tracks, rowsList, startIndex = 0, fullLi
           <div class="playing-bar" style="${isPlaying ? '' : 'animation-play-state: paused;'}"></div>
         </div>
       </div>
-      <img class="track-cell-cover" src="${API_BASE}/api/covers/${track.id}" alt="" onerror="this.style.opacity='0.2'" />
+      <img class="track-cell-cover" src="${getApiBase()}/api/covers/${track.id}" alt="" onerror="this.style.opacity='0.2'" />
       <div class="track-cell-info">
         <div class="track-title-line">
           <span class="track-cell-title">${escapeHtml(track.title)}</span>
