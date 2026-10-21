@@ -87,7 +87,6 @@ def _register_candidates(candidates: List[Dict[str, Any]]):
     now = time.time()
     for c in candidates:
         cid = c.get("candidate_id")
-        src = c.get("source", "").lower()
         from plugin_system.manager import plugin_manager
         c["can_preview"] = plugin_manager.can_preview_candidate(c)
         if cid:
@@ -196,16 +195,16 @@ async def replace_track_version(
     from plugin_system.manager import plugin_manager
     from streaming.scanner import extract_metadata
 
-    # Восстановление полных серверных метаданных (peer, filename, size), если передан candidate_id
+    # Восстановление полных серверных метаданных плагина, если передан candidate_id
     cid = candidate.get("candidate_id")
     if cid:
         orig = _get_candidate_by_id(cid)
         if orig:
             merged = dict(orig)
             merged.update(candidate)
-            for k in ("peer", "filename", "size", "plugin_name", "source"):
-                if orig.get(k) and not candidate.get(k):
-                    merged[k] = orig[k]
+            for k, v in orig.items():
+                if k not in candidate or candidate[k] is None:
+                    merged[k] = v
             candidate = merged
 
     old_path = track.file_path
@@ -338,33 +337,35 @@ async def download_candidate_endpoint(
     from plugin_system.manager import plugin_manager
     from streaming.scanner import extract_metadata
 
-    # Восстановление полных серверных метаданных (peer, filename, size), если передан candidate_id
+    # Восстановление полных серверных метаданных плагина, если передан candidate_id
     cid = candidate.get("candidate_id")
     if cid:
         orig = _get_candidate_by_id(cid)
         if orig:
             merged = dict(orig)
             merged.update(candidate)
-            for k in ("peer", "filename", "size", "plugin_name", "source"):
-                if orig.get(k) and not candidate.get(k):
-                    merged[k] = orig[k]
+            for k, v in orig.items():
+                if k not in candidate or candidate[k] is None:
+                    merged[k] = v
             candidate = merged
 
     source = candidate.get("source", "").lower()
     fmt = str(candidate.get("format", "mp3")).lower()
     music_root = os.getenv("MUSIC_DIR") or "/music"
 
+    src_label = candidate.get("source_name") or candidate.get("source") or "внешний источник"
+
     # Если источник фоновый/очередной (не поддерживает прямой предпросмотр и синхронную запись)
     if not plugin_manager.can_preview_candidate(candidate):
         dest = "" if fmt == "flac" else "non-flac"
         success = await plugin_manager.download_selected_candidate(candidate, destination=dest)
         if not success:
-            raise HTTPException(status_code=500, detail=f"Ошибка постановки в очередь загрузчика ({source.capitalize()})")
+            raise HTTPException(status_code=500, detail=f"Ошибка постановки в очередь загрузки ({src_label})")
         return {
             "status": "queued",
-            "source": source.capitalize(),
+            "source": src_label,
             "destination": dest or "flac-root",
-            "message": f"Файл успешно поставлен в очередь фоновой загрузки сервера ({source.capitalize()})"
+            "message": f"Файл успешно поставлен в очередь фоновой загрузки сервера ({src_label})"
         }
 
     # Для синхронных веб-источников
