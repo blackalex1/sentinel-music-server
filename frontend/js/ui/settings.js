@@ -464,14 +464,55 @@ async function checkAppUpdate(silent = false) {
             statusEl.innerHTML += `<div style="margin-top: 4px; color: var(--text-muted); font-size: 0.8rem;">Автообновление доступно администратору сервера.</div>`;
           }
         } else {
-          // В приложении Desktop скачиваем переносимый .exe или открываем релиз
+          // В приложении Desktop скачиваем и обновляем в 1 клик
           const portableAsset = (data.assets || []).find(a => a.name.toLowerCase().includes('portable') && a.name.endsWith('.exe'));
-          const downloadUrl = portableAsset ? portableAsset.browser_download_url : data.html_url;
-          btnDownload.href = downloadUrl;
-          btnDownload.textContent = portableAsset ? `Скачать v${latestTag} (Portable)` : `Открыть v${latestTag} на GitHub`;
-          btnDownload.onclick = (e) => {
+          const setupAsset = (data.assets || []).find(a => a.name.toLowerCase().includes('setup') && a.name.endsWith('.exe'));
+          const targetAsset = portableAsset || setupAsset;
+          const downloadUrl = targetAsset ? targetAsset.browser_download_url : data.html_url;
+
+          btnDownload.textContent = `Обновить приложение до v${latestTag}`;
+          btnDownload.onclick = async (e) => {
             e.preventDefault();
-            openExternalUrl(downloadUrl);
+            if (!targetAsset) {
+              openExternalUrl(downloadUrl);
+              return;
+            }
+            const confirmed = await showConfirm(
+              `Обновить Sentinel Music Desktop до версии v${latestTag}?\n\n` +
+              `Приложение автоматически скачает обновление и перезапустится за несколько секунд.`
+            );
+            if (!confirmed) return;
+
+            btnDownload.disabled = true;
+            btnDownload.style.opacity = '0.6';
+            btnDownload.style.pointerEvents = 'none';
+            btnDownload.textContent = '⏳ Скачивание и обновление...';
+            if (btnCheck) btnCheck.disabled = true;
+            if (statusEl) {
+              statusEl.innerHTML = `<span style="color: #38bdf8;">⏳ Загрузка версии v${latestTag} с GitHub и замена файлов... Пожалуйста, подождите.</span>`;
+            }
+
+            try {
+              const invoke = window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
+              if (typeof invoke === 'function') {
+                await invoke('install_desktop_update', {
+                  downloadUrl: targetAsset.browser_download_url,
+                  isInstaller: !portableAsset
+                });
+              } else {
+                openExternalUrl(downloadUrl);
+              }
+            } catch (err) {
+              showToast(err || 'Ошибка при обновлении приложения', 'alert');
+              if (statusEl) {
+                statusEl.innerHTML = `<span style="color: #f87171;">Ошибка: ${escapeHtml(err)}</span>`;
+              }
+              btnDownload.disabled = false;
+              btnDownload.style.opacity = '1';
+              btnDownload.style.pointerEvents = 'auto';
+              btnDownload.textContent = `Повторить обновление до v${latestTag}`;
+              if (btnCheck) btnCheck.disabled = false;
+            }
           };
         }
       }
