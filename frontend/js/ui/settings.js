@@ -373,7 +373,7 @@ function escapeHtml(str) {
 /**
  * 5. Проверка и загрузка обновлений с GitHub
  */
-const CURRENT_DESKTOP_VERSION = '0.0.1';
+const CURRENT_DESKTOP_VERSION = '0.0.2';
 const isTauriDesktop = !!(window.__TAURI_INTERNALS__ || window.__TAURI__);
 const GITHUB_DESKTOP_REPO = isTauriDesktop ? 'blackalex1/sentinel-music-desktop' : 'blackalex1/sentinel-music-server';
 

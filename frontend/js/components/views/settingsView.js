@@ -111,7 +111,7 @@ export function renderSettingsView() {
               <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
                 <div>
                   <div style="font-size: 0.92rem; font-weight: 600; color: #fff;">
-                    Установленная версия: <span id="appCurrentVersionText" style="color: #a78bfa;">v0.0.1</span>
+                    Установленная версия: <span id="appCurrentVersionText" style="color: #a78bfa;">v0.0.2</span>
                   </div>
                   <div id="appUpdateStatusText" style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">
                     Нажмите «Проверить обновления» для связи с GitHub.
