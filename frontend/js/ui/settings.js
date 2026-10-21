@@ -422,10 +422,16 @@ async function checkAppUpdate(silent = false) {
         btnDownload.href = downloadUrl;
         btnDownload.style.display = 'inline-flex';
         btnDownload.textContent = portableAsset ? `Скачать v${latestTag} (Portable)` : `Открыть v${latestTag} на GitHub`;
+        btnDownload.onclick = (e) => {
+          e.preventDefault();
+          openExternalUrl(downloadUrl);
+        };
       }
       if (notesEl && data.body) {
         notesEl.style.display = 'block';
-        notesEl.textContent = data.body;
+        const escaped = (data.body || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const linked = escaped.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" style="color: #a78bfa; text-decoration: underline;">$1</a>');
+        notesEl.innerHTML = linked;
       }
       if (!silent) {
         showToast(`Доступно обновление Sentinel Music v${latestTag}`, 'success');
@@ -461,4 +467,39 @@ function isNewerVersion(latest, current) {
     if (l < c) return false;
   }
   return false;
+}
+
+
+export function openExternalUrl(url) {
+  if (!url) return;
+  try {
+    if (window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function') {
+      window.__TAURI__.core.invoke('open_in_browser', { url }).catch(err => {
+        console.warn('[Desktop] Tauri open_in_browser error:', err);
+        fallbackOpen(url);
+      });
+      return;
+    }
+    if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === 'function') {
+      window.__TAURI_INTERNALS__.invoke('open_in_browser', { url }).catch(err => {
+        console.warn('[Desktop] Tauri internals open_in_browser error:', err);
+        fallbackOpen(url);
+      });
+      return;
+    }
+  } catch (e) {
+    console.warn('[Desktop] Error invoking Tauri open_in_browser:', e);
+  }
+  fallbackOpen(url);
+}
+
+function fallbackOpen(url) {
+  try {
+    const win = window.open(url, '_blank');
+    if (!win) {
+      window.location.href = url;
+    }
+  } catch (_) {
+    window.location.href = url;
+  }
 }

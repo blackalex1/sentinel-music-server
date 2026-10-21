@@ -15,6 +15,7 @@ import { toggleExpandedPlayer } from './ui/expandedPlayer.js';
 import { mountLayout } from './components/layout.js';
 import { loadFrontendPlugins } from './pluginLoader.js';
 import { initRemoteConnect } from './remote.js';
+import { openExternalUrl } from './ui/settings.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const token = getAuthToken();
@@ -193,3 +194,13 @@ function seekRelative(deltaSeconds) {
     seekTime(Math.max(0, Math.min(audio.duration, audio.currentTime + deltaSeconds)));
   }
 }
+
+
+// Перехват всех внешних ссылок с target="_blank" для открытия в системном браузере
+document.addEventListener('click', (e) => {
+  const anchor = e.target.closest('a[target="_blank"]');
+  if (anchor && anchor.href && (anchor.href.startsWith('http://') || anchor.href.startsWith('https://'))) {
+    e.preventDefault();
+    openExternalUrl(anchor.href);
+  }
+});
