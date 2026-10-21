@@ -220,7 +220,7 @@ def test_download_candidate_queued(client, auth_headers, monkeypatch):
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "queued"
-    assert data["source"] == "Provider_p2p"
+    assert data["source"] == "provider_p2p"
 
 
 def test_download_candidate_web(client, auth_headers, tmp_path, monkeypatch):
