@@ -233,3 +233,43 @@ async def generate_ssl_certificate(
     }
 
 
+@router.get("/version")
+@router.get("/system/version")
+def get_system_version_info(
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
+    """Возвращает информацию о версии сервера и поддержке автоматического обновления."""
+    from core.updater import get_version_info
+    return get_version_info()
+
+
+@router.post("/update")
+@router.post("/system/update")
+async def trigger_system_update(
+    current_user: User = Depends(get_current_admin_user)
+):
+    """
+    Запускает автоматическое обновление сервера (1-Click Update):
+    - Скачивает последние изменения из репозитория GitHub
+    - Применяет обновления (git reset --hard)
+    - Инициирует безопасный перезапуск сервера
+    Требуются права администратора.
+    """
+    import asyncio
+    from core.updater import perform_server_update, schedule_server_restart
+
+    success, msg = await asyncio.to_thread(perform_server_update, "main")
+    if not success:
+        raise HTTPException(status_code=500, detail=msg)
+
+    # Запускаем отложенный перезапуск (1.5 сек), чтобы успеть вернуть ответ клиенту
+    schedule_server_restart(delay_seconds=1.5)
+
+    return {
+        "status": "success",
+        "message": msg,
+        "restarting": True
+    }
+
+
+

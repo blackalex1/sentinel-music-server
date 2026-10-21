@@ -105,4 +105,69 @@ def test_ssl_generate_self_signed(client, auth_headers, tmp_path, monkeypatch):
     assert (tmp_path / "key.pem").exists()
 
 
+def test_system_version_endpoint(client):
+    """Проверяет получение версии и метаданных системы без обязательной авторизации."""
+    res = client.get("/api/system/version")
+    assert res.status_code == 200
+    data = res.json()
+    assert "version" in data
+    assert "is_git" in data
+    assert "can_auto_update" in data
+
+
+def test_system_update_success(client, auth_headers, monkeypatch):
+    """Проверяет успешный вызов 1-Click Update администратором."""
+    import core.updater as updater_module
+
+    restart_called = []
+    monkeypatch.setattr(updater_module, "perform_server_update", lambda branch="main": (True, "Обновление успешно загружено. Коммит: abc1234"))
+    monkeypatch.setattr(updater_module, "schedule_server_restart", lambda delay_seconds=1.5: restart_called.append(delay_seconds))
+
+    res = client.post("/api/system/update", headers=auth_headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert data["restarting"] is True
+    assert "Обновление успешно загружено" in data["message"]
+    assert len(restart_called) == 1
+    assert restart_called[0] == 1.5
+
+
+def test_system_update_failure(client, auth_headers, monkeypatch):
+    """Проверяет корректную обработку ошибки при сбое обновления git."""
+    import core.updater as updater_module
+
+    monkeypatch.setattr(updater_module, "perform_server_update", lambda branch="main": (False, "Сетевая ошибка: GitHub недоступен"))
+
+    res = client.post("/api/system/update", headers=auth_headers)
+    assert res.status_code == 500
+    assert "GitHub недоступен" in res.json()["detail"]
+
+
+def test_system_update_permissions(client, db_session):
+    """Проверяет, что не-администратор не имеет права запускать обновление системы (403/401)."""
+    # 1. Анонимный запрос
+    res_anon = client.post("/api/system/update")
+    assert res_anon.status_code in (401, 403)
+
+    # 2. Обычный пользователь (не админ)
+    from database.models import User, SessionToken
+    from core.security import hash_password, generate_session_token
+
+    salt, p_hash = hash_password("secret123")
+    regular_user = User(username="regular_user", password_hash=p_hash, salt=salt, is_admin=False)
+    db_session.add(regular_user)
+    db_session.commit()
+    db_session.refresh(regular_user)
+
+    token = generate_session_token()
+    db_session.add(SessionToken(token=token, user_id=regular_user.id, device_name="Device"))
+    db_session.commit()
+
+    res_user = client.post("/api/system/update", headers={"Authorization": f"Bearer {token}"})
+    assert res_user.status_code == 403
+
+
+
+
 

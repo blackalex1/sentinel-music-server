@@ -373,7 +373,7 @@ function escapeHtml(str) {
 /**
  * 5. Проверка и загрузка обновлений с GitHub
  */
-const CURRENT_DESKTOP_VERSION = '0.0.2';
+let CURRENT_APP_VERSION = '0.0.2';
 const isTauriDesktop = !!(window.__TAURI_INTERNALS__ || window.__TAURI__);
 const GITHUB_DESKTOP_REPO = isTauriDesktop ? 'blackalex1/sentinel-music-desktop' : 'blackalex1/sentinel-music-server';
 
@@ -381,6 +381,19 @@ function setupAppUpdateSection() {
   const btnCheck = document.getElementById('btnCheckAppUpdate');
   if (btnCheck) {
     btnCheck.addEventListener('click', () => checkAppUpdate(false));
+  }
+  // Первоначальное определение актуальной версии сервера при работе в Web
+  if (!isTauriDesktop) {
+    apiFetch('/api/system/version')
+      .then(r => r.ok ? r.json() : null)
+      .then(info => {
+        if (info && info.version) {
+          CURRENT_APP_VERSION = info.version;
+          const verEl = document.getElementById('appCurrentVersionText');
+          if (verEl) verEl.textContent = `v${info.version}`;
+        }
+      })
+      .catch(() => {});
   }
 }
 
@@ -398,6 +411,17 @@ async function checkAppUpdate(silent = false) {
     if (btnCheck) btnCheck.disabled = true;
   }
 
+  // Обновляем версию сервера из API перед проверкой
+  if (!isTauriDesktop) {
+    try {
+      const vRes = await apiFetch('/api/system/version');
+      if (vRes.ok) {
+        const vInfo = await vRes.json();
+        if (vInfo.version) CURRENT_APP_VERSION = vInfo.version;
+      }
+    } catch (_) {}
+  }
+
   try {
     const res = await fetch(`https://api.github.com/repos/${GITHUB_DESKTOP_REPO}/releases/latest`, {
       headers: { 'Accept': 'application/vnd.github.v3+json' }
@@ -413,19 +437,43 @@ async function checkAppUpdate(silent = false) {
 
     const data = await res.json();
     const latestTag = (data.tag_name || '').replace(/^v/, '').trim();
+    const isAdmin = !!(state.currentUser && state.currentUser.is_admin);
 
-    if (isNewerVersion(latestTag, CURRENT_DESKTOP_VERSION)) {
+    if (isNewerVersion(latestTag, CURRENT_APP_VERSION)) {
       statusEl.innerHTML = `<span style="color: #10b981; font-weight: 600;">✓ Доступна новая версия: v${latestTag}!</span>`;
       if (btnDownload) {
-        const portableAsset = (data.assets || []).find(a => a.name.toLowerCase().includes('portable') && a.name.endsWith('.exe'));
-        const downloadUrl = portableAsset ? portableAsset.browser_download_url : data.html_url;
-        btnDownload.href = downloadUrl;
         btnDownload.style.display = 'inline-flex';
-        btnDownload.textContent = portableAsset ? `Скачать v${latestTag} (Portable)` : `Открыть v${latestTag} на GitHub`;
-        btnDownload.onclick = (e) => {
-          e.preventDefault();
-          openExternalUrl(downloadUrl);
-        };
+        btnDownload.disabled = false;
+        btnDownload.style.opacity = '1';
+        btnDownload.style.pointerEvents = 'auto';
+
+        if (!isTauriDesktop) {
+          // В Web-интерфейсе сервера предлагаем обновление в 1 клик для администратора
+          if (isAdmin) {
+            btnDownload.textContent = `Обновить сервер до v${latestTag}`;
+            btnDownload.onclick = (e) => {
+              e.preventDefault();
+              triggerServerUpdate(latestTag);
+            };
+          } else {
+            btnDownload.textContent = `Открыть v${latestTag} на GitHub`;
+            btnDownload.onclick = (e) => {
+              e.preventDefault();
+              openExternalUrl(data.html_url);
+            };
+            statusEl.innerHTML += `<div style="margin-top: 4px; color: var(--text-muted); font-size: 0.8rem;">Автообновление доступно администратору сервера.</div>`;
+          }
+        } else {
+          // В приложении Desktop скачиваем переносимый .exe или открываем релиз
+          const portableAsset = (data.assets || []).find(a => a.name.toLowerCase().includes('portable') && a.name.endsWith('.exe'));
+          const downloadUrl = portableAsset ? portableAsset.browser_download_url : data.html_url;
+          btnDownload.href = downloadUrl;
+          btnDownload.textContent = portableAsset ? `Скачать v${latestTag} (Portable)` : `Открыть v${latestTag} на GitHub`;
+          btnDownload.onclick = (e) => {
+            e.preventDefault();
+            openExternalUrl(downloadUrl);
+          };
+        }
       }
       if (notesEl && data.body) {
         notesEl.style.display = 'block';
@@ -437,7 +485,7 @@ async function checkAppUpdate(silent = false) {
         showToast(`Доступно обновление Sentinel Music v${latestTag}`, 'success');
       }
     } else {
-      statusEl.textContent = `У вас установлена самая свежая версия (v${CURRENT_DESKTOP_VERSION}).`;
+      statusEl.textContent = `У вас установлена самая свежая версия (v${CURRENT_APP_VERSION}).`;
       statusEl.style.color = '#94a3b8';
       if (btnDownload) btnDownload.style.display = 'none';
       if (notesEl) notesEl.style.display = 'none';
@@ -452,6 +500,85 @@ async function checkAppUpdate(silent = false) {
       showToast('Ошибка при проверке обновлений', 'alert');
     }
   } finally {
+    if (btnCheck) btnCheck.disabled = false;
+  }
+}
+
+async function triggerServerUpdate(latestTag) {
+  const confirmed = await showConfirm(
+    `Обновить Sentinel Music Server до версии v${latestTag}?\n\n` +
+    `Сервер автоматически загрузит актуальные изменения с GitHub и перезапустится.\n` +
+    `Связь временно прервется на 3-5 секунд.`
+  );
+  if (!confirmed) return;
+
+  const statusEl = document.getElementById('appUpdateStatusText');
+  const btnDownload = document.getElementById('btnDownloadAppUpdate');
+  const btnCheck = document.getElementById('btnCheckAppUpdate');
+
+  if (btnDownload) {
+    btnDownload.disabled = true;
+    btnDownload.style.opacity = '0.6';
+    btnDownload.style.pointerEvents = 'none';
+    btnDownload.textContent = '⏳ Применение обновления...';
+  }
+  if (btnCheck) btnCheck.disabled = true;
+  if (statusEl) {
+    statusEl.innerHTML = `<span style="color: #38bdf8;">⏳ Загрузка обновления с GitHub и перезапуск сервера... Пожалуйста, не закрывайте страницу.</span>`;
+  }
+
+  try {
+    const res = await apiFetch('/api/system/update', { method: 'POST' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Ошибка сервера' }));
+      throw new Error(err.detail || 'Не удалось запустить обновление');
+    }
+
+    showToast('Обновление применено! Сервер перезапускается...', 'info');
+
+    // Ожидание перезапуска сервера: пингуем /api/auth/status каждые 2 секунды
+    let attempts = 0;
+    const maxAttempts = 30; // до 60 секунд ожидания
+    const pollInterval = setInterval(async () => {
+      attempts++;
+      try {
+        const ping = await fetch('/api/auth/status', { cache: 'no-store' });
+        if (ping.ok) {
+          clearInterval(pollInterval);
+          if (statusEl) {
+            statusEl.innerHTML = `<span style="color: #10b981; font-weight: 600;">✓ Сервер успешно обновлен до v${latestTag}! Перезагрузка страницы...</span>`;
+          }
+          showToast(`Сервер успешно обновлен до v${latestTag}!`, 'checkCircle');
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
+        }
+      } catch (_) {
+        if (attempts >= maxAttempts) {
+          clearInterval(pollInterval);
+          if (statusEl) {
+            statusEl.innerHTML = `<span style="color: #f87171;">Сервер перезапускается дольше обычного. Обновите страницу вручную.</span>`;
+          }
+          if (btnDownload) {
+            btnDownload.disabled = false;
+            btnDownload.style.opacity = '1';
+            btnDownload.style.pointerEvents = 'auto';
+          }
+          if (btnCheck) btnCheck.disabled = false;
+        }
+      }
+    }, 2000);
+  } catch (err) {
+    showToast(err.message || 'Ошибка обновления сервера', 'alert');
+    if (statusEl) {
+      statusEl.innerHTML = `<span style="color: #f87171;">Ошибка: ${escapeHtml(err.message)}</span>`;
+    }
+    if (btnDownload) {
+      btnDownload.disabled = false;
+      btnDownload.style.opacity = '1';
+      btnDownload.style.pointerEvents = 'auto';
+      btnDownload.textContent = `Повторить обновление до v${latestTag}`;
+    }
     if (btnCheck) btnCheck.disabled = false;
   }
 }
