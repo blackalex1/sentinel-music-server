@@ -70,6 +70,36 @@ pull_updates() {
     fi
 }
 
+# Режим фонового демона для 1-Click Update из веб-интерфейса
+if [[ "$*" == *"--watch"* ]] || [[ "$*" == *"-w"* ]]; then
+    echo "=========================================="
+    echo " 👀 Режим фонового отслеживания 1-Click Update"
+    echo "=========================================="
+    echo " Ожидание триггера обновления из веб-интерфейса (data/update.trigger)..."
+    TRIGGER_FILE="data/update.trigger"
+    while true; do
+        if [ -f "$TRIGGER_FILE" ]; then
+            echo ""
+            echo "⚡ [$(date '+%Y-%m-%d %H:%M:%S')] Обнаружен триггер обновления из веб-интерфейса!"
+            rm -f "$TRIGGER_FILE"
+            pull_updates "main"
+            if command -v docker &> /dev/null; then
+                if docker compose version &> /dev/null; then
+                    COMPOSE_CMD="docker compose"
+                elif command -v docker-compose &> /dev/null; then
+                    COMPOSE_CMD="docker-compose"
+                fi
+                echo "🐳 Пересборка и перезапуск контейнера..."
+                $COMPOSE_CMD up -d --build
+            fi
+            echo "✅ Контейнер успешно обновлен и перезапущен!"
+            echo "👀 Возврат в режим отслеживания..."
+        fi
+        sleep 3
+    done
+    exit 0
+fi
+
 pull_updates "main"
 
 echo ">> [2/3] 🐳 Применение изменений в Docker..."

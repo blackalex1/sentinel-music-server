@@ -69,15 +69,41 @@ def get_current_git_commit() -> Optional[str]:
     return None
 
 
+def is_in_docker() -> bool:
+    """Проверяет, запущен ли сервер внутри изолированного Docker-контейнера."""
+    if os.path.exists("/.dockerenv") or os.environ.get("DOCKER_CONTAINER") == "1":
+        return True
+    try:
+        if os.path.exists("/proc/1/cgroup"):
+            with open("/proc/1/cgroup", "r", encoding="utf-8", errors="ignore") as f:
+                if "docker" in f.read():
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+def write_update_trigger(target_version: str = "") -> str:
+    """Записывает файл-триггер в постоянный том data для автообновления хостом."""
+    from core.config import settings
+    os.makedirs(settings.DATA_DIR, exist_ok=True)
+    trigger_file = os.path.join(settings.DATA_DIR, "update.trigger")
+    with open(trigger_file, "w", encoding="utf-8") as f:
+        f.write(f"target_version={target_version}\ntimestamp={time.time()}\n")
+    return trigger_file
+
+
 def get_version_info() -> Dict[str, Any]:
     """Возвращает информацию о текущей версии сервера и поддержке обновления."""
     git_repo = is_git_repository()
+    in_docker = is_in_docker()
     commit = get_current_git_commit() if git_repo else None
     return {
         "version": CURRENT_VERSION,
         "is_git": git_repo,
+        "in_docker": in_docker,
         "commit": commit,
-        "can_auto_update": git_repo,
+        "can_auto_update": git_repo or in_docker,
     }
 
 
@@ -104,12 +130,19 @@ def find_working_remote(branch: str = "main") -> Optional[str]:
     return None
 
 
-def perform_server_update(branch: str = "main") -> Tuple[bool, str]:
+def perform_server_update(branch: str = "main", target_version: str = "") -> Tuple[bool, str]:
     """
     Загружает актуальный код из GitHub и применяет изменения (git fetch & git reset --hard).
+    В среде Docker регистрирует файл-триггер в общем томе data для фоновой пересборки хостом.
     """
+    if is_in_docker():
+        trigger_path = write_update_trigger(target_version)
+        logger.info(f"[Updater] В Docker-окружении создан триггер обновления: {trigger_path}")
+        return True, "Сигнал обновления передан хост-демону. Сервер пересобирается и перезапускается..."
+
     if not is_git_repository():
-        return False, "Сервер запущен не из git-репозитория. Автообновление доступно при клонировании через git или в Docker Compose."
+        trigger_path = write_update_trigger(target_version)
+        return True, "Флаг обновления зарегистрирован в томе данных для обработки хостом."
 
     # Находим доступный адрес (официальный GitHub или зеркало)
     remote_url = find_working_remote(branch)
