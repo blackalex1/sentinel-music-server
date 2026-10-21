@@ -196,6 +196,18 @@ async def replace_track_version(
     from plugin_system.manager import plugin_manager
     from streaming.scanner import extract_metadata
 
+    # Восстановление полных серверных метаданных (peer, filename, size), если передан candidate_id
+    cid = candidate.get("candidate_id")
+    if cid:
+        orig = _get_candidate_by_id(cid)
+        if orig:
+            merged = dict(orig)
+            merged.update(candidate)
+            for k in ("peer", "filename", "size", "plugin_name", "source"):
+                if orig.get(k) and not candidate.get(k):
+                    merged[k] = orig[k]
+            candidate = merged
+
     old_path = track.file_path
     base_dir = os.path.dirname(old_path) if old_path and os.path.exists(os.path.dirname(old_path)) else (os.getenv("MUSIC_DIR") or "/music")
     new_fmt = str(candidate.get("format", "mp3")).lower()
@@ -325,6 +337,18 @@ async def download_candidate_endpoint(
 
     from plugin_system.manager import plugin_manager
     from streaming.scanner import extract_metadata
+
+    # Восстановление полных серверных метаданных (peer, filename, size), если передан candidate_id
+    cid = candidate.get("candidate_id")
+    if cid:
+        orig = _get_candidate_by_id(cid)
+        if orig:
+            merged = dict(orig)
+            merged.update(candidate)
+            for k in ("peer", "filename", "size", "plugin_name", "source"):
+                if orig.get(k) and not candidate.get(k):
+                    merged[k] = orig[k]
+            candidate = merged
 
     source = candidate.get("source", "").lower()
     fmt = str(candidate.get("format", "mp3")).lower()
