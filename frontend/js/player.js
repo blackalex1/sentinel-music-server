@@ -8,6 +8,7 @@ import { sendReaction, fetchShuffleTracks } from './api.js';
 import { icon } from './icons.js';
 import { syncTrackReactionUI } from './ui/reactions.js';
 import { audioFx } from './audioFx.js';
+import { sendRemoteCommand } from './remote.js';
 
 let audio = null;
 let audioCtx = null;
@@ -15,6 +16,8 @@ let audioSourceNode = null;
 let trackGainNode = null;
 let masterGainNode = null;
 let isAudioGraphInitialized = false;
+let playbackRetryCount = 0;
+let isRetryingPlayback = false;
 
 export function ensureAudioGraph() {
   if (!audio) return;
@@ -186,12 +189,21 @@ export function initPlayer() {
     ensureAudioGraph();
     updateState('isPlaying', true);
     updatePlayButtonsUI(true);
+    window.dispatchEvent(new CustomEvent('playback:play', { detail: state.currentTrack }));
+    window.dispatchEvent(new CustomEvent('playback:state', { detail: { isPlaying: true, track: state.currentTrack } }));
+  });
+
+  audio.addEventListener('playing', () => {
+    playbackRetryCount = 0;
+    isRetryingPlayback = false;
   });
 
   audio.addEventListener('pause', () => {
     updateState('isPlaying', false);
     updatePlayButtonsUI(false);
     savePlaybackSession(true);
+    window.dispatchEvent(new CustomEvent('playback:pause', { detail: state.currentTrack }));
+    window.dispatchEvent(new CustomEvent('playback:state', { detail: { isPlaying: false, track: state.currentTrack } }));
   });
 
   audio.addEventListener('seeked', () => {
@@ -204,43 +216,141 @@ export function initPlayer() {
 
   audio.addEventListener('ended', onTrackEnded);
 
-  audio.addEventListener('error', (e) => {
+  audio.addEventListener('error', async (e) => {
     const err = audio.error;
     const current = state.currentTrack;
     console.warn('[Player] Ошибка воспроизведения медиаресурса:', err, current);
 
+    // 1. Игнорируем ошибку MEDIA_ERR_ABORTED (код 1) при штатной смене трека или паузе
+    if (err && err.code === 1) {
+      return;
+    }
+
+    if (!current) {
+      updateState('isPlaying', false);
+      updatePlayButtonsUI(false);
+      return;
+    }
+
+    const trackName = `${current.artist || ''} - ${current.title || 'Трек'}`.trim();
+
+    // Если ошибка произошла при предпрослушивании кандидата (не локальный трек фонотеки)
+    if (current.is_preview || current.is_candidate || current.preview_url || !current.id || (typeof current.id === 'string' && current.id.startsWith('candidate_')) || (typeof current.id === 'number' && current.id <= 0)) {
+      isRetryingPlayback = false;
+      updateState('isPlaying', false);
+      updatePlayButtonsUI(false);
+      window.dispatchEvent(new CustomEvent('playback:pause', { detail: current }));
+      window.dispatchEvent(new CustomEvent('playback:state', { detail: { isPlaying: false, track: current } }));
+      window.dispatchEvent(new CustomEvent('app:toast', {
+        detail: `Не удалось загрузить поток предпрослушивания «${trackName}»`
+      }));
+      return;
+    }
+    const resumePos = state.currentTime || audio.currentTime || 0;
+
+    // 2. Если лимит попыток не исчерпан — проверяем источник на сервере и пробуем возобновить стрим
+    if (playbackRetryCount < 2 && !isRetryingPlayback) {
+      isRetryingPlayback = true;
+      playbackRetryCount++;
+
+      console.log(`[Player] Попытка восстановления потока (${playbackRetryCount}/2) для «${trackName}» с позиции ${resumePos.toFixed(1)} сек...`);
+
+      try {
+        const token = getAuthToken();
+        const base = getApiBase();
+        const checkUrl = `${base}/api/stream/${current.id}${token ? `?token=${token}` : ''}`;
+
+        const resp = await fetch(checkUrl, {
+          method: 'HEAD',
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        }).catch(() => null);
+
+        // Сервер явно подтвердил 404 (файл действительно отсутствует)
+        if (resp && resp.status === 404) {
+          isRetryingPlayback = false;
+          updateState('isPlaying', false);
+          updatePlayButtonsUI(false);
+
+          window.dispatchEvent(new CustomEvent('app:toast', {
+            detail: `Аудиофайл «${trackName}» отсутствует на сервере (404)`
+          }));
+
+          // Удаляем подтвержденно отсутствующий трек из очереди и локального состояния
+          if (current.id) {
+            const updatedTracks = (state.tracks || []).filter(t => t.id !== current.id);
+            const updatedQueue = (state.queue || []).filter(t => t.id !== current.id);
+            updateState('tracks', updatedTracks);
+            updateState('queue', updatedQueue);
+
+            window.dispatchEvent(new CustomEvent('track:deleted', { detail: { trackId: current.id } }));
+            window.dispatchEvent(new CustomEvent('queue:updated'));
+
+            const row = document.querySelector(`.track-row[data-id="${current.id}"]`);
+            if (row) {
+              row.style.opacity = '0.35';
+              row.style.filter = 'grayscale(1)';
+              row.style.pointerEvents = 'none';
+              const titleCell = row.querySelector('.track-cell-title');
+              if (titleCell && !titleCell.innerHTML.includes('(файл удален)')) {
+                titleCell.innerHTML += ' <span style="font-size: 0.72rem; color: #ef4444; font-weight: normal;">(файл отсутствует на диске)</span>';
+              }
+            }
+          }
+
+          // Автоматически переходим к следующему треку в очереди
+          if (state.queue && state.queue.length > 0) {
+            nextTrack();
+          }
+          return;
+        }
+
+        // Если файл доступен (200 / 206) или временная сетевая задержка — перезапускаем поток
+        setTimeout(() => {
+          if (state.currentTrack && state.currentTrack.id === current.id) {
+            audio.load();
+            if (resumePos > 0) {
+              const onMetadata = () => {
+                try {
+                  audio.currentTime = resumePos;
+                } catch (err) {
+                  console.warn('[Player] Не удалось восстановить позицию:', err);
+                }
+              };
+              if (audio.readyState >= 1) {
+                onMetadata();
+              } else {
+                audio.addEventListener('loadedmetadata', onMetadata, { once: true });
+              }
+            }
+            audio.play().then(() => {
+              isRetryingPlayback = false;
+              updateState('isPlaying', true);
+              updatePlayButtonsUI(true);
+              console.log(`[Player] Воспроизведение «${trackName}» успешно возобновлено`);
+            }).catch(playErr => {
+              isRetryingPlayback = false;
+              console.warn('[Player] Ошибка при автоматическом возобновлении:', playErr);
+              updateState('isPlaying', false);
+              updatePlayButtonsUI(false);
+            });
+          } else {
+            isRetryingPlayback = false;
+          }
+        }, 800);
+        return;
+      } catch (checkErr) {
+        console.warn('[Player] Ошибка проверки доступности трека:', checkErr);
+      }
+      isRetryingPlayback = false;
+    }
+
+    // 3. Если восстановление исчерпано (повторные сбои соединения / декодирования)
     updateState('isPlaying', false);
     updatePlayButtonsUI(false);
 
-    if (current) {
-      const trackName = `${current.artist || ''} - ${current.title || 'Трек'}`.trim();
-      window.dispatchEvent(new CustomEvent('app:toast', {
-        detail: `Аудиофайл «${trackName}» отсутствует на сервере (404) и удален из фонотеки`
-      }));
-
-      // Удаляем фантомный трек из локального состояния медиатеки и очереди
-      if (current.id) {
-        const updatedTracks = (state.tracks || []).filter(t => t.id !== current.id);
-        const updatedQueue = (state.queue || []).filter(t => t.id !== current.id);
-        updateState('tracks', updatedTracks);
-        updateState('queue', updatedQueue);
-
-        window.dispatchEvent(new CustomEvent('track:deleted', { detail: { trackId: current.id } }));
-        window.dispatchEvent(new CustomEvent('queue:updated'));
-
-        // Затемняем строку трека в текущем списке результатов
-        const row = document.querySelector(`.track-row[data-id="${current.id}"]`);
-        if (row) {
-          row.style.opacity = '0.35';
-          row.style.filter = 'grayscale(1)';
-          row.style.pointerEvents = 'none';
-          const titleCell = row.querySelector('.track-cell-title');
-          if (titleCell && !titleCell.innerHTML.includes('(файл удален)')) {
-            titleCell.innerHTML += ' <span style="font-size: 0.72rem; color: #ef4444; font-weight: normal;">(файл отсутствует на диске)</span>';
-          }
-        }
-      }
-    }
+    window.dispatchEvent(new CustomEvent('app:toast', {
+      detail: `Временный сбой воспроизведения «${trackName}». Нажмите Play для повтора.`
+    }));
   });
 
   updateLoudnessBadgeUI();
@@ -288,15 +398,49 @@ export async function initServerShuffleQueue(seedTrack) {
 export function playTrack(track, queueList = null, isStream = false, autoPlay = true, startPosition = 0) {
   if (!track) return;
 
+  // Если активно удаленное устройство Sentinel Connect (колонка или смартфон)
+  if (state.selectedRemoteDevice) {
+    const targetId = state.selectedRemoteDevice.id;
+    const effectiveQueue = queueList || state.queue || [track];
+    sendRemoteCommand(targetId, 'PLAY_TRACK', {
+      track,
+      queue: effectiveQueue.slice(0, 50),
+      auto_play: autoPlay,
+      position_seconds: startPosition || 0,
+      position_ms: Math.round((startPosition || 0) * 1000)
+    });
+    updateState('currentTrack', track);
+    updateState('queue', effectiveQueue);
+    updateState('isPlaying', autoPlay);
+    updateState('currentTime', startPosition || 0);
+    if (track.duration) updateState('duration', track.duration);
+    updateTrackInfoUI(track);
+    updatePlayButtonsUI(autoPlay);
+    updateTimelineUI();
+    if (audio && !audio.paused) audio.pause();
+    window.dispatchEvent(new CustomEvent('track:changed', { detail: track }));
+    window.dispatchEvent(new CustomEvent('queue:updated'));
+    return;
+  }
+
   // Если был текущий трек и он отличается от нового, сохраняем его в историю
   if (state.currentTrack && state.currentTrack.id !== track.id) {
     const currentHist = Array.isArray(state.history) ? state.history : [];
     if (currentHist.length === 0 || currentHist[0].id !== state.currentTrack.id) {
-      updateState('history', [state.currentTrack, ...currentHist].slice(0, 50));
+      if (!state.currentTrack.is_preview && !state.currentTrack.is_candidate) {
+        updateState('history', [state.currentTrack, ...currentHist].slice(0, 50));
+      }
     }
   }
 
-  if (queueList) {
+  if (track.is_preview || track.is_candidate) {
+    // Для трека предпрослушивания: не изменяем основную очередь медиатеки,
+    // но если очередь пуста — устанавливаем трек
+    if (!state.queue || state.queue.length === 0) {
+      updateState('queue', [track]);
+      updateState('queueIndex', 0);
+    }
+  } else if (queueList) {
     const hasTrack = queueList.some(t => t.id === track.id);
     const effectiveQueue = hasTrack ? queueList : [track, ...queueList];
     if (state.isShuffle) {
@@ -350,13 +494,17 @@ export function playTrack(track, queueList = null, isStream = false, autoPlay = 
     }
   }
 
+  playbackRetryCount = 0;
+  isRetryingPlayback = false;
+
   updateState('currentTrack', track);
+  updateState('lyrics', []);
+  updateState('activeLyricIndex', -1);
   updateState('isStreamActive', isStream);
   updateState('currentTime', startPosition || 0);
   if (track.duration) {
     updateState('duration', track.duration);
   }
-  updateState('activeLyricIndex', -1);
 
   // Сохраняем историю сессии Потока для защиты от повторов
   if (isStream && track && track.id > 0) {
@@ -368,10 +516,10 @@ export function playTrack(track, queueList = null, isStream = false, autoPlay = 
   }
 
   const token = getAuthToken();
-  const isPreview = track.preview_url || (track.id < 0 && track.file_path && track.file_path.startsWith('http'));
+  const isPreview = track.is_preview || track.preview_url || (track.id < 0 && track.file_path && track.file_path.startsWith('http'));
   const base = getApiBase();
   const streamUrl = isPreview
-    ? (track.preview_url || track.file_path)
+    ? (track.preview_url || track.file_path || track.stream_url)
     : `${base}/api/stream/${track.id}${token ? `?token=${token}` : ''}`;
 
   audio.src = streamUrl;
@@ -427,6 +575,14 @@ export function playTrack(track, queueList = null, isStream = false, autoPlay = 
 }
 
 export function togglePlay() {
+  if (state.selectedRemoteDevice) {
+    sendRemoteCommand(state.selectedRemoteDevice.id, 'TOGGLE_PLAY');
+    const nextState = !state.isPlaying;
+    updateState('isPlaying', nextState);
+    updatePlayButtonsUI(nextState);
+    if (audio && !audio.paused) audio.pause();
+    return;
+  }
   if ((!audio.src || audio.src === window.location.href || audio.src.endsWith('/null')) && state.currentTrack) {
     playTrack(state.currentTrack, state.queue, false, true, state.currentTime || 0);
     return;
@@ -447,10 +603,49 @@ export function togglePlay() {
   }
 }
 
+export function pauseTrack() {
+  if (state.selectedRemoteDevice) {
+    sendRemoteCommand(state.selectedRemoteDevice.id, 'PAUSE');
+    updateState('isPlaying', false);
+    updatePlayButtonsUI(false);
+    return;
+  }
+  if (audio && !audio.paused) {
+    audio.pause();
+  }
+}
+
+export function resumeTrack() {
+  if (state.selectedRemoteDevice) {
+    sendRemoteCommand(state.selectedRemoteDevice.id, 'PLAY');
+    updateState('isPlaying', true);
+    updatePlayButtonsUI(true);
+    return;
+  }
+  if (audio && audio.paused) {
+    audio.play().catch(e => {
+      console.warn('[Player] Ошибка возобновления воспроизведения:', e);
+    });
+  }
+}
+
 export async function nextTrack() {
+  if (state.selectedRemoteDevice) {
+    sendRemoteCommand(state.selectedRemoteDevice.id, 'NEXT');
+    return;
+  }
   if (state.isStreamActive) {
     window.dispatchEvent(new CustomEvent('stream:request-next'));
     return;
+  }
+
+  // Если играл трек предпрослушивания — возвращаемся к текущей очереди медиатеки
+  if (state.currentTrack && (state.currentTrack.is_preview || state.currentTrack.is_candidate)) {
+    if (state.queue && state.queue.length > 0) {
+      const targetIdx = (typeof state.queueIndex === 'number' && state.queueIndex >= 0 && state.queueIndex < state.queue.length) ? state.queueIndex : 0;
+      playTrack(state.queue[targetIdx], state.queue);
+      return;
+    }
   }
 
   if (state.queue.length === 0) return;
@@ -491,9 +686,22 @@ export async function nextTrack() {
 }
 
 export function prevTrack() {
+  if (state.selectedRemoteDevice) {
+    sendRemoteCommand(state.selectedRemoteDevice.id, 'PREV');
+    return;
+  }
   if (audio && audio.currentTime > 3) {
     audio.currentTime = 0;
     return;
+  }
+
+  // Если играл трек предпрослушивания — возвращаемся к текущей очереди медиатеки
+  if (state.currentTrack && (state.currentTrack.is_preview || state.currentTrack.is_candidate)) {
+    if (state.queue && state.queue.length > 0) {
+      const targetIdx = (typeof state.queueIndex === 'number' && state.queueIndex >= 0 && state.queueIndex < state.queue.length) ? state.queueIndex : 0;
+      playTrack(state.queue[targetIdx], state.queue);
+      return;
+    }
   }
 
   if (state.queue.length === 0) return;
@@ -525,6 +733,13 @@ export function seekTime(seconds) {
   const target = Math.max(0, Number(seconds) || 0);
   updateState('currentTime', target);
   updateTimelineUI();
+  if (state.selectedRemoteDevice) {
+    sendRemoteCommand(state.selectedRemoteDevice.id, 'SEEK', {
+      position_seconds: target,
+      position_ms: Math.round(target * 1000)
+    });
+    return;
+  }
   if (audio) {
     try {
       audio.currentTime = target;
@@ -538,6 +753,14 @@ export function setVolume(val) {
   try {
     localStorage.setItem('sentinel_volume', v.toString());
   } catch (_) {}
+  const fill = document.getElementById('volumeFill');
+  if (fill) fill.style.width = `${v * 100}%`;
+  const expFill = document.getElementById('expandedVolumeFill');
+  if (expFill) expFill.style.width = `${v * 100}%`;
+  if (state.selectedRemoteDevice) {
+    sendRemoteCommand(state.selectedRemoteDevice.id, 'SET_VOLUME', { volume: v });
+    return;
+  }
   ensureAudioGraph();
   if (masterGainNode && audioCtx) {
     if (audio) audio.volume = 1.0;
@@ -586,6 +809,14 @@ export async function setShuffle(enabled) {
 }
 
 export async function toggleShuffle() {
+  if (state.selectedRemoteDevice) {
+    const next = !state.isShuffle;
+    updateState('isShuffle', next);
+    const btn = document.getElementById('btnShuffle');
+    if (btn) btn.classList.toggle('active', next);
+    sendRemoteCommand(state.selectedRemoteDevice.id, 'SHUFFLE', { is_shuffle: next });
+    return;
+  }
   const next = !state.isShuffle;
   updateState('isShuffle', next);
   const btn = document.getElementById('btnShuffle');
@@ -643,6 +874,10 @@ export function setRepeatMode(mode) {
     btn.classList.toggle('active', valid !== 'off');
     btn.innerHTML = valid === 'one' ? icon('repeatOne', { size: 17 }) : icon('repeat', { size: 17 });
   }
+  if (state.selectedRemoteDevice) {
+    sendRemoteCommand(state.selectedRemoteDevice.id, 'REPEAT', { repeat_mode: valid, mode: valid });
+    return;
+  }
   savePlaybackSession(true);
 }
 
@@ -657,6 +892,14 @@ function onTrackEnded() {
   if (state.repeatMode === 'one') {
     audio.currentTime = 0;
     audio.play();
+  } else if (state.currentTrack && (state.currentTrack.is_preview || state.currentTrack.is_candidate)) {
+    audio.currentTime = 0;
+    updateState('isPlaying', false);
+    updateState('currentTime', 0);
+    updatePlayButtonsUI(false);
+    updateTimelineUI();
+    window.dispatchEvent(new CustomEvent('playback:pause', { detail: state.currentTrack }));
+    window.dispatchEvent(new CustomEvent('playback:state', { detail: { isPlaying: false, track: state.currentTrack } }));
   } else {
     nextTrack();
   }
@@ -724,28 +967,42 @@ export function updateTrackInfoUI(track) {
   const artist = document.getElementById('playerTrackArtist');
   const cover = document.getElementById('playerTrackCover');
 
-  if (title) title.textContent = track.title;
-  if (artist) artist.textContent = track.artist;
+  if (title) title.textContent = track.title || 'Без названия';
+  if (artist) artist.textContent = track.artist || 'Неизвестный исполнитель';
   if (cover) {
     if (track.cover_url) {
       cover.src = track.cover_url;
-    } else {
+      cover.style.display = 'block';
+    } else if (typeof track.id === 'number' && track.id > 0) {
       cover.src = `${getApiBase()}/api/covers/${track.id}`;
+      cover.style.display = 'block';
+    } else {
+      cover.removeAttribute('src');
+      cover.style.display = 'none';
     }
-    cover.style.display = 'block';
   }
 
   // Сквозная синхронизация состояния лайка во всех компонентах интерфейса
-  syncTrackReactionUI(track.id, !!track.is_liked, !!track.is_disliked);
+  if (typeof track.id === 'number' && track.id > 0) {
+    syncTrackReactionUI(track.id, !!track.is_liked, !!track.is_disliked);
+  } else {
+    syncTrackReactionUI(null, false, false);
+  }
 }
 
 function setupMediaSession(track) {
   if ('mediaSession' in navigator) {
+    const artwork = [];
+    if (track.cover_url) {
+      artwork.push({ src: track.cover_url, sizes: '512x512', type: 'image/jpeg' });
+    } else if (typeof track.id === 'number' && track.id > 0) {
+      artwork.push({ src: `${getApiBase()}/api/covers/${track.id}`, sizes: '512x512', type: 'image/jpeg' });
+    }
     navigator.mediaSession.metadata = new MediaMetadata({
-      title: track.title,
-      artist: track.artist,
-      album: track.album || 'Фонотека',
-      artwork: [{ src: `${getApiBase()}/api/covers/${track.id}`, sizes: '512x512', type: 'image/jpeg' }]
+      title: track.title || 'Без названия',
+      artist: track.artist || 'Неизвестный исполнитель',
+      album: track.album || track.source_name || 'Фонотека',
+      artwork
     });
 
     navigator.mediaSession.setActionHandler('play', togglePlay);
@@ -899,10 +1156,12 @@ let lastSavePlaybackTime = 0;
  * Сохраняет текущую сессию воспроизведения (трек, очередь, позиция, настройки) в localStorage браузера.
  */
 export function savePlaybackSession(force = false, customTimestamp = null) {
-  if (!state.currentTrack) {
-    try {
-      localStorage.removeItem('sentinel_playback_session');
-    } catch (_) {}
+  if (!state.currentTrack || state.currentTrack.is_preview || state.currentTrack.is_candidate) {
+    if (!state.currentTrack) {
+      try {
+        localStorage.removeItem('sentinel_playback_session');
+      } catch (_) {}
+    }
     return;
   }
 

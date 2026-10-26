@@ -29,7 +29,7 @@ import { fetchTrackCandidates, replaceTrackWithCandidate } from '../api.js';
 import { formatTime, playTrack, applyTrackLoudnessGain } from '../player.js';
 import { showToast, escapeHtml } from './toast.js';
 import { icon } from '../icons.js';
-import { isCandidatePreviewSupported, toggleCandidatePreview, stopCandidatePreview } from '../candidatePreview.js';
+import { isCandidatePreviewSupported, toggleCandidatePreview, stopCandidatePreview, isCandidatePlaying } from '../candidatePreview.js';
 
 let currentModalTrack = null;
 let currentCandidates = [];
@@ -39,7 +39,7 @@ let currentCandidateFilter = 'all';
  * Открывает модальное окно выбора версии трека (Не та версия / Заменить).
  */
 export async function openTrackVersionModal(track) {
-  stopCandidatePreview();
+  stopCandidatePreview(true);
   currentModalTrack = track;
   currentCandidateFilter = 'all';
 
@@ -142,6 +142,13 @@ function renderCandidateList(candidates, filter = 'all') {
     const durationStr = cand.duration ? (typeof cand.duration === 'number' ? formatTime(cand.duration) : cand.duration) : '';
 
     const canPreview = isCandidatePreviewSupported(cand);
+    const isPlaying = canPreview && isCandidatePlaying(cand);
+    if (isPlaying) {
+      card.classList.add('preview-playing');
+    }
+    const previewBtnClass = isPlaying ? 'btn-secondary cand-btn-preview btn-preview-playing' : 'btn-secondary cand-btn-preview';
+    const previewBtnIcon = isPlaying ? 'pause' : 'play';
+    const previewBtnText = isPlaying ? 'Пауза' : 'Слушать';
 
     card.innerHTML = `
       <div class="candidate-main">
@@ -156,8 +163,8 @@ function renderCandidateList(candidates, filter = 'all') {
       </div>
       <div class="candidate-actions">
         ${canPreview ? `
-          <button class="btn-secondary cand-btn-preview">
-            ${icon('play', { size: 13 })} Слушать
+          <button class="${previewBtnClass}" data-candidate-id="${escapeHtml(cand.candidate_id)}">
+            ${icon(previewBtnIcon, { size: 13 })} <span>${previewBtnText}</span>
           </button>
         ` : ''}
         <button class="btn-primary cand-btn-select">Заменить</button>

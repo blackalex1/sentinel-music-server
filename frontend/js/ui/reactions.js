@@ -18,7 +18,19 @@ import { showToast } from './toast.js';
  * Синхронизирует визуальное и внутреннее состояние лайка/дизлайка трека во всем приложении.
  */
 export function syncTrackReactionUI(trackId, isLiked, isDisliked = false) {
-  if (trackId === null || trackId === undefined) return;
+  if (trackId === null || trackId === undefined || isNaN(Number(trackId)) || Number(trackId) <= 0) {
+    const btnLike = document.getElementById('btnPlayerLike');
+    const btnDislike = document.getElementById('btnPlayerDislike');
+    if (btnLike) {
+      btnLike.classList.remove('active');
+      btnLike.innerHTML = icon('heart', { size: 18 });
+    }
+    if (btnDislike) {
+      btnDislike.classList.remove('active');
+      btnDislike.innerHTML = icon('thumbsDown', { size: 18 });
+    }
+    return;
+  }
   const tId = Number(trackId);
   const likedBool = Boolean(isLiked);
   const dislikedBool = Boolean(isDisliked);
@@ -125,7 +137,10 @@ export function syncTrackReactionUI(trackId, isLiked, isDisliked = false) {
  * Единый переключатель отметки «Нравится» с мгновенной синхронизацией всех элементов.
  */
 export async function toggleLikeAction(trackId) {
-  if (trackId === null || trackId === undefined) return null;
+  if (trackId === null || trackId === undefined || isNaN(Number(trackId)) || Number(trackId) <= 0) {
+    showToast('Лайки доступны для треков вашей фонотеки', 'heart');
+    return null;
+  }
   const tId = Number(trackId);
 
   // Оптимистичное переключение для мгновенного отклика интерфейса
@@ -161,7 +176,10 @@ export async function toggleLikeAction(trackId) {
  * Единый переключатель отметки «Не нравится» с синхронизацией интерфейса.
  */
 export async function toggleDislikeAction(trackId) {
-  if (trackId === null || trackId === undefined) return null;
+  if (trackId === null || trackId === undefined || isNaN(Number(trackId)) || Number(trackId) <= 0) {
+    showToast('Дизлайки доступны для треков вашей фонотеки', 'thumbsDown');
+    return null;
+  }
   const tId = Number(trackId);
 
   try {

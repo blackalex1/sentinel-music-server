@@ -6,16 +6,32 @@
 
 import { state, updateState, onStateChange } from './state.js';
 import { getApiBase } from './config.js';
-import { fetchLyrics } from './api.js';
+import { fetchLyrics, refreshLyrics } from './api.js';
 import { seekTime } from './player.js';
 
 let currentLyricsTrackId = null;
+let lyricsAbortController = null;
 
 export function initLyrics() {
   const closeBtn = document.getElementById('btnCloseLyrics');
   if (closeBtn) {
     closeBtn.addEventListener('click', () => {
       toggleLyricsOverlay(false);
+    });
+  }
+
+  // Кнопка принудительного повторного поиска текста песни (сброс кэша и .lrc)
+  const refreshBtn = document.getElementById('btnRefreshLyrics');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', async () => {
+      const cur = state.currentTrack;
+      if (!cur || !cur.id) return;
+      refreshBtn.classList.add('spinning');
+      try {
+        await refreshTrackLyrics(cur.id);
+      } finally {
+        refreshBtn.classList.remove('spinning');
+      }
     });
   }
 
@@ -31,20 +47,25 @@ export function initLyrics() {
   window.addEventListener('track:changed', (e) => {
     const track = e.detail;
     if (track && track.id) {
-      currentLyricsTrackId = null;
-      updateState('activeLyricIndex', -1);
-      const container = document.getElementById('lyricsContainer');
-      if (container) {
-        container.scrollTop = 0;
-      }
       updateLyricsOverlayTrackInfo(track);
-      loadTrackLyrics(track.id);
+      if (typeof track.id === 'number' && track.id > 0) {
+        loadTrackLyrics(track.id);
+      } else {
+        renderLyricsEmpty('Текст песни недоступен в режиме предпрослушивания');
+      }
     }
   });
 
   onStateChange('currentTrack', (track) => {
     if (track) {
       updateLyricsOverlayTrackInfo(track);
+      if (track.id && currentLyricsTrackId !== track.id) {
+        if (typeof track.id === 'number' && track.id > 0) {
+          loadTrackLyrics(track.id);
+        } else {
+          renderLyricsEmpty('Текст песни недоступен в режиме предпрослушивания');
+        }
+      }
     }
   });
 
@@ -110,7 +131,7 @@ function updateLyricsOverlayTrackInfo(track) {
   if (headerTitle) headerTitle.textContent = track.title || 'Трек не выбран';
   if (headerArtist) headerArtist.textContent = track.artist || 'Sentinel Music';
 
-  const coverUrl = track.cover_url || (track.id ? `${getApiBase()}/api/covers/${track.id}` : '');
+  const coverUrl = track.cover_url || (track.id && typeof track.id === 'number' && track.id > 0 ? `${getApiBase()}/api/covers/${track.id}` : '');
 
   if (headerCover) {
     if (coverUrl) {
@@ -135,10 +156,17 @@ function updateLyricsOverlayTrackInfo(track) {
 }
 
 /**
- * Загрузка текста песни для указанного трека.
+ * Загрузка текста песни для указанного трека с защитой от Race Condition.
  */
 export async function loadTrackLyrics(trackId) {
   if (currentLyricsTrackId === trackId && state.lyrics && state.lyrics.length > 0) return;
+
+  if (lyricsAbortController) {
+    lyricsAbortController.abort();
+  }
+  lyricsAbortController = new AbortController();
+  const currentSignal = lyricsAbortController.signal;
+
   currentLyricsTrackId = trackId;
 
   const container = document.getElementById('lyricsContainer');
@@ -151,7 +179,11 @@ export async function loadTrackLyrics(trackId) {
   updateState('activeLyricIndex', -1);
 
   try {
-    const data = await fetchLyrics(trackId);
+    const data = await fetchLyrics(trackId, currentSignal);
+    if (currentSignal.aborted || currentLyricsTrackId !== trackId) {
+      return;
+    }
+
     if (!data) {
       renderLyricsEmpty('Текст песни пока не найден в базе');
       return;
@@ -160,7 +192,6 @@ export async function loadTrackLyrics(trackId) {
     if (data.synced && Array.isArray(data.lines) && data.lines.length > 0) {
       updateState('lyrics', data.lines);
       renderSyncedLyrics(data.lines);
-      // Если воспроизведение уже шло дальше начала, синхронизируем
       if (state.currentTime > 0) {
         syncLyricsWithTime(state.currentTime);
       }
@@ -170,8 +201,57 @@ export async function loadTrackLyrics(trackId) {
       renderLyricsEmpty('Для этого трека текст отсутствует');
     }
   } catch (err) {
+    if (err.name === 'AbortError' || currentLyricsTrackId !== trackId) return;
     console.warn('Ошибка при получении текста песни:', err);
     renderLyricsEmpty('Не удалось загрузить текст песни');
+  }
+}
+
+/**
+ * Принудительный сброс и повторный поиск текста песни через API.
+ */
+export async function refreshTrackLyrics(trackId) {
+  if (lyricsAbortController) {
+    lyricsAbortController.abort();
+  }
+  lyricsAbortController = new AbortController();
+
+  currentLyricsTrackId = trackId;
+
+  const container = document.getElementById('lyricsContainer');
+  if (container) {
+    container.innerHTML = '<div class="lyrics-empty-state">Повторный поиск правильного текста...</div>';
+    container.scrollTop = 0;
+  }
+
+  updateState('lyrics', []);
+  updateState('activeLyricIndex', -1);
+
+  try {
+    const data = await refreshLyrics(trackId);
+    if (currentLyricsTrackId !== trackId) return;
+
+    if (!data) {
+      renderLyricsEmpty('Текст песни пока не найден в базе');
+      return;
+    }
+
+    if (data.synced && Array.isArray(data.lines) && data.lines.length > 0) {
+      updateState('lyrics', data.lines);
+      renderSyncedLyrics(data.lines);
+      if (state.currentTime > 0) {
+        syncLyricsWithTime(state.currentTime);
+      }
+    } else if (data.raw) {
+      renderRawLyrics(data.raw);
+    } else {
+      renderLyricsEmpty('Для этого трека текст отсутствует');
+    }
+  } catch (err) {
+    console.warn('Ошибка при повторном поиске текста песни:', err);
+    if (currentLyricsTrackId === trackId) {
+      renderLyricsEmpty('Не удалось обновить текст песни');
+    }
   }
 }
 

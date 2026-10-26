@@ -10,7 +10,7 @@ import { state, updateState } from '../state.js';
 import { fetchTracks, searchCandidates, downloadCandidate } from '../api.js';
 import { icon } from '../icons.js';
 import { showToast, escapeHtml } from './toast.js';
-import { stopCandidatePreview, toggleCandidatePreview, isCandidatePreviewSupported } from '../candidatePreview.js';
+import { stopCandidatePreview, toggleCandidatePreview, isCandidatePreviewSupported, isCandidatePlaying } from '../candidatePreview.js';
 import {
   disconnectTracksScrollObserver,
   setHasMoreLibraryTracks,
@@ -295,9 +295,14 @@ export function setupSearch() {
       const sizeText = cand.size ? ` • ${icon('database', { size: 13 })} ${(cand.size / 1024 / 1024).toFixed(1)} MB` : '';
       const sourceLabel = cand.source_name || cand.source || 'В сети';
       const canPreview = isCandidatePreviewSupported(cand);
+      const isPlaying = canPreview && isCandidatePlaying(cand);
+      const cardClass = isPlaying ? 'candidate-card preview-playing' : 'candidate-card';
+      const previewBtnClass = isPlaying ? 'btn-secondary candidate-preview-btn btn-preview-playing' : 'btn-secondary candidate-preview-btn';
+      const previewBtnIcon = isPlaying ? 'pause' : 'play';
+      const previewBtnText = isPlaying ? 'Пауза' : 'Слушать';
 
       cardsHtml += `
-        <div class="candidate-card" id="candidateCard_${idx}">
+        <div class="${cardClass}" id="candidateCard_${idx}">
           <div class="candidate-info">
             <div class="candidate-title">${escapeHtml(cand.title || 'Без названия')}</div>
             <div class="candidate-meta">
@@ -309,8 +314,8 @@ export function setupSearch() {
           </div>
           <div class="candidate-actions">
             ${canPreview ? `
-              <button class="btn-secondary candidate-preview-btn" data-idx="${idx}">
-                ${icon('play', { size: 14 })} <span>Слушать</span>
+              <button class="${previewBtnClass}" data-idx="${idx}" data-candidate-id="${escapeHtml(cand.candidate_id)}">
+                ${icon(previewBtnIcon, { size: 14 })} <span>${previewBtnText}</span>
               </button>
             ` : ''}
             <button class="btn-primary candidate-download-btn" data-idx="${idx}">

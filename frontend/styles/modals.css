@@ -244,3 +244,207 @@
   color: #6ee7b7;
   box-shadow: 0 0 12px rgba(16, 185, 129, 0.35);
 }
+
+/* --- Стили модального окна выбора устройств Sentinel Connect --- */
+.devices-modal-card {
+  max-width: 490px;
+  padding: 26px 28px;
+}
+
+.devices-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.devices-modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.devices-modal-icon-badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(138, 43, 226, 0.2);
+  border: 1px solid rgba(138, 43, 226, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #a855f7;
+}
+
+.devices-section-title {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted, #94a3b8);
+  margin-bottom: 8px;
+}
+
+.device-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  margin-bottom: 8px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.device-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(138, 43, 226, 0.3);
+}
+
+.device-card.active {
+  background: rgba(138, 43, 226, 0.12);
+  border-color: rgba(138, 43, 226, 0.5);
+  box-shadow: 0 0 15px rgba(138, 43, 226, 0.15);
+}
+
+.device-card-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.device-type-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary, #cbd5e1);
+  flex-shrink: 0;
+}
+
+.device-card.active .device-type-icon {
+  background: rgba(138, 43, 226, 0.25);
+  color: #c084fc;
+}
+
+.device-card-info {
+  min-width: 0;
+}
+
+.device-card-name {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text-primary, #ffffff);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device-card.active .device-card-name {
+  color: #e9d5ff;
+}
+
+.device-card-desc {
+  font-size: 0.76rem;
+  color: var(--text-muted, #94a3b8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.device-card-desc.playing {
+  color: #4ade80;
+}
+
+.device-active-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #a855f7;
+  background: rgba(138, 43, 226, 0.2);
+  padding: 4px 10px;
+  border-radius: 20px;
+  letter-spacing: 0.02em;
+}
+
+.devices-list {
+  max-height: 240px;
+  overflow-y: auto;
+  margin-bottom: 14px;
+  padding-right: 2px;
+}
+
+.devices-empty-state {
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--text-muted, #94a3b8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-text-action {
+  background: none;
+  border: none;
+  color: #a855f7;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: opacity 0.2s;
+}
+
+.btn-text-action:hover {
+  opacity: 0.8;
+}
+
+.devices-modal-footer-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.74rem;
+  color: var(--text-muted, #94a3b8);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 8px 12px;
+  line-height: 1.35;
+}
+
+/* Плашка активного устройства в панели плеера */
+.player-device-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #c084fc;
+  background: rgba(138, 43, 226, 0.16);
+  border: 1px solid rgba(138, 43, 226, 0.35);
+  border-radius: 12px;
+  padding: 2px 8px;
+  margin-top: 3px;
+  cursor: pointer;
+  transition: all 0.2s;
+  width: fit-content;
+}
+
+.player-device-pill:hover {
+  background: rgba(138, 43, 226, 0.28);
+  border-color: rgba(138, 43, 226, 0.6);
+}
+

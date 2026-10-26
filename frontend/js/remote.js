@@ -1,7 +1,9 @@
 /**
- * Sentinel Connect — Модуль удаленного управления (Remote Control / Connect) на стороне ПК.
- * Регистрирует ПК как активный плеер в шине WebSocket сервера,
- * слушает команды от Android-приложения и отсылает текущее состояние воспроизведения.
+ * Sentinel Connect — Модуль удаленного управления и воспроизведения (Connect / Remote Control).
+ * Поддерживает:
+ * - Управление воспроизведением на других устройствах (Яндекс.Станция, Смартфон, другие ПК).
+ * - Прием команд удаленного управления от других устройств.
+ * - Двустороннюю синхронизацию состояний плееров через WebSocket / REST.
  */
 
 import { state, updateState } from './state.js';
@@ -48,7 +50,7 @@ export function getOrCreateDeviceId() {
 }
 
 /**
- * Определяет понятное имя устройства для отображения в списке на Android.
+ * Определяет понятное имя устройства для отображения в домашней сети.
  */
 export function getDeviceName() {
   if (isTauri) {
@@ -65,14 +67,201 @@ export function getDeviceName() {
 }
 
 /**
+ * Отправляет удаленную команду конкретному целевому устройству (через WebSocket с фолбэком на REST).
+ */
+export function sendRemoteCommand(targetDeviceId, command, payload = {}) {
+  if (!targetDeviceId) return false;
+
+  const msg = {
+    action: 'command',
+    target_device_id: targetDeviceId,
+    command: command.toUpperCase(),
+    payload: payload || {}
+  };
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify(msg));
+      return true;
+    } catch (e) {
+      console.warn('[Sentinel Connect] Ошибка отправки команды в WebSocket:', e);
+    }
+  }
+
+  // Фолбэк на REST API
+  const token = getAuthToken();
+  if (token) {
+    fetch(`${getApiBase()}/api/remote/command`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        target_device_id: targetDeviceId,
+        command: command.toUpperCase(),
+        payload: payload || {}
+      })
+    }).catch(err => console.warn('[Sentinel Connect] Ошибка отправки команды через REST:', err));
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Запрашивает актуальный список устройств пользователя с сервера.
+ */
+export function requestDevices() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify({ action: 'request_devices' }));
+    } catch (_) {}
+  }
+  refreshDevicesHttp();
+}
+
+/**
+ * HTTP-запрос списка онлайн-устройств.
+ */
+export async function refreshDevicesHttp() {
+  const token = getAuthToken();
+  if (!token) return;
+
+  try {
+    const res = await fetch(`${getApiBase()}/api/remote/devices`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const myId = getOrCreateDeviceId();
+      const raw = Array.isArray(data.devices) ? data.devices : [];
+      const filtered = raw.filter(d => d.id !== myId);
+      updateState('availableDevices', filtered);
+      window.dispatchEvent(new CustomEvent('sentinel:devices-changed', { detail: filtered }));
+    }
+  } catch (e) {
+    console.warn('[Sentinel Connect] Ошибка HTTP-запроса списка устройств:', e);
+  }
+}
+
+/**
+ * Переключает активное целевое устройство для воспроизведения.
+ * @param {Object|null} device - объект устройства из availableDevices или null для возврата на этот компьютер
+ */
+export function selectPlaybackDevice(device) {
+  const audio = document.getElementById('audioElement');
+  const previousRemote = state.selectedRemoteDevice;
+
+  if (!device) {
+    // Возврат на локальный компьютер
+    if (previousRemote) {
+      sendRemoteCommand(previousRemote.id, 'PAUSE');
+    }
+    updateState('selectedRemoteDevice', null);
+    updateDeviceIndicatorsUI();
+    window.dispatchEvent(new CustomEvent('sentinel:device-selected', { detail: null }));
+    window.dispatchEvent(new CustomEvent('app:toast', { detail: '💻 Воспроизведение на этом компьютере' }));
+    return;
+  }
+
+  // Переключение на удаленное устройство (колонку или телефон)
+  const isLocalPlaying = audio && !audio.paused;
+  const curTrack = state.currentTrack;
+  const curPos = (audio && audio.currentTime > 0) ? audio.currentTime : (state.currentTime || 0);
+  const curQueue = Array.isArray(state.queue) ? state.queue : [];
+
+  // Останавливаем локальное воспроизведение на ПК
+  if (audio && !audio.paused) {
+    audio.pause();
+  }
+
+  updateState('selectedRemoteDevice', device);
+  updateDeviceIndicatorsUI();
+  window.dispatchEvent(new CustomEvent('sentinel:device-selected', { detail: device }));
+  window.dispatchEvent(new CustomEvent('app:toast', { detail: `🎧 Воспроизведение переключено на: ${device.name}` }));
+
+  // Если на ПК уже играл трек — передаем сессию на целевое устройство (TRANSFER_PLAYBACK)
+  if (curTrack) {
+    sendRemoteCommand(device.id, 'TRANSFER_PLAYBACK', {
+      track: curTrack,
+      queue: curQueue.slice(0, 50),
+      position_seconds: curPos,
+      position_ms: Math.round(curPos * 1000),
+      auto_play: isLocalPlaying
+    });
+  } else if (device.current_track) {
+    // Если на самом удаленном устройстве уже играет музыка — подтягиваем её в UI
+    syncRemoteStateToPlayerUI(device);
+  }
+}
+
+/**
+ * Синхронизирует состояние удаленного устройства с UI локального плеера.
+ */
+export function syncRemoteStateToPlayerUI(dev) {
+  if (!dev) return;
+
+  if (dev.current_track) {
+    updateState('currentTrack', dev.current_track);
+    updateTrackInfoUI(dev.current_track);
+  }
+  if (typeof dev.is_playing === 'boolean') {
+    updateState('isPlaying', dev.is_playing);
+    updatePlayButtonsUI(dev.is_playing);
+  }
+  if (typeof dev.position_ms === 'number') {
+    updateState('currentTime', dev.position_ms / 1000.0);
+  }
+  if (typeof dev.duration_ms === 'number' && dev.duration_ms > 0) {
+    updateState('duration', dev.duration_ms / 1000.0);
+  }
+  updateTimelineUI();
+
+  if (typeof dev.is_shuffle === 'boolean') {
+    updateState('isShuffle', dev.is_shuffle);
+    const btnShuffle = document.getElementById('btnShuffle');
+    if (btnShuffle) btnShuffle.classList.toggle('active', dev.is_shuffle);
+  }
+  if (dev.repeat_mode) {
+    updateState('repeatMode', dev.repeat_mode);
+    const btnRepeat = document.getElementById('btnRepeat');
+    if (btnRepeat) btnRepeat.classList.toggle('active', dev.repeat_mode !== 'off');
+  }
+
+  // Обновляем плашку и индикаторы
+  updateDeviceIndicatorsUI();
+}
+
+/**
+ * Обновляет иконку и плашку выбранного устройства в плеере.
+ */
+export function updateDeviceIndicatorsUI() {
+  const dev = state.selectedRemoteDevice;
+  const btn = document.getElementById('btnPlayerConnect');
+  const pill = document.getElementById('playerDevicePill');
+  const pillName = document.getElementById('playerDevicePillName');
+
+  if (btn) {
+    btn.classList.toggle('active', Boolean(dev));
+    btn.title = dev ? `Воспроизведение на: ${dev.name} (нажмите для выбора)` : 'Устройства Sentinel Connect (D)';
+  }
+  if (pill && pillName) {
+    if (dev) {
+      pill.style.display = 'inline-flex';
+      pillName.textContent = dev.name;
+    } else {
+      pill.style.display = 'none';
+    }
+  }
+}
+
+/**
  * Инициализирует WebSocket-подключение Sentinel Connect.
  */
 export function initRemoteConnect() {
   const token = getAuthToken();
-  if (!token) {
-    // Пользователь еще не авторизован, отложим подключение
-    return;
-  }
+  if (!token) return;
 
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
     return;
@@ -81,20 +270,19 @@ export function initRemoteConnect() {
   const deviceId = getOrCreateDeviceId();
   const deviceName = getDeviceName();
 
-  // Преобразуем динамический HTTP URL сервера в WS URL
   const base = getApiBase().replace(/\/+$/, '');
   let wsUrl = base.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
-  wsUrl += `/api/remote/ws?token=${encodeURIComponent(token)}&device_id=${encodeURIComponent(deviceId)}&device_name=${encodeURIComponent(deviceName)}&device_type=player`;
+  wsUrl += `/api/remote/ws?token=${encodeURIComponent(token)}&device_id=${encodeURIComponent(deviceId)}&device_name=${encodeURIComponent(deviceName)}&device_type=hybrid`;
 
   try {
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
       isConnected = true;
-      console.log(`[Sentinel Connect] Подключено к серверу как плеер: ${deviceName} (${deviceId})`);
+      console.log(`[Sentinel Connect] Подключено к серверу как hybrid (плеер + пульт): ${deviceName} (${deviceId})`);
       updateConnectIndicatorUI(true);
+      updateDeviceIndicatorsUI();
 
-      // Запуск периодического heartbeat ping раз в 15 секунд для удержания соединения
       if (pingIntervalTimer) clearInterval(pingIntervalTimer);
       pingIntervalTimer = setInterval(() => {
         if (ws && ws.readyState === WebSocket.OPEN) {
@@ -104,31 +292,35 @@ export function initRemoteConnect() {
         }
       }, 15000);
 
+      // Запрашиваем устройства сразу после подключения
+      requestDevices();
+
       const audio = document.getElementById('audioElement');
       if (audio && !audio._remoteListenersAttached) {
         audio._remoteListenersAttached = true;
         audio.addEventListener('play', () => {
-          if (!isApplyingRemoteState) broadcastCurrentState(true);
+          if (!isApplyingRemoteState && !state.selectedRemoteDevice) broadcastCurrentState(true);
         });
         audio.addEventListener('pause', () => {
-          if (!isApplyingRemoteState) broadcastCurrentState(true);
+          if (!isApplyingRemoteState && !state.selectedRemoteDevice) broadcastCurrentState(true);
         });
         audio.addEventListener('seeked', () => {
-          if (!isApplyingRemoteState) broadcastCurrentState(true);
+          if (!isApplyingRemoteState && !state.selectedRemoteDevice) broadcastCurrentState(true);
         });
         audio.addEventListener('timeupdate', () => {
-          if (!isApplyingRemoteState) broadcastCurrentState(false);
+          if (!isApplyingRemoteState && !state.selectedRemoteDevice) broadcastCurrentState(false);
         });
       }
       if (!window._remoteTrackListenerAttached) {
         window._remoteTrackListenerAttached = true;
         window.addEventListener('track:changed', () => {
-          if (!isApplyingRemoteState) broadcastCurrentState(true);
+          if (!isApplyingRemoteState && !state.selectedRemoteDevice) broadcastCurrentState(true);
         });
       }
 
-      // Немедленно отправляем текущее состояние воспроизведения
-      broadcastCurrentState(true);
+      if (!state.selectedRemoteDevice) {
+        broadcastCurrentState(true);
+      }
     };
 
     ws.onmessage = (event) => {
@@ -160,9 +352,6 @@ export function initRemoteConnect() {
   }
 }
 
-/**
- * Планирует автоматическое переподключение с задержкой при обрыве связи.
- */
 function scheduleReconnect() {
   if (reconnectTimer) return;
   reconnectTimer = setTimeout(() => {
@@ -171,42 +360,62 @@ function scheduleReconnect() {
   }, 4000);
 }
 
-/**
- * Обрабатывает входящие события и команды от сервера и других устройств.
- */
 function handleIncomingMessage(msg) {
   if (!msg || !msg.type) return;
 
   switch (msg.type) {
     case 'welcome':
-      console.log(`[Sentinel Connect] Зарегистрирован в сети. Доступных устройств:`, msg.devices?.length || 0);
-      if (Array.isArray(msg.devices)) {
-        window.dispatchEvent(new CustomEvent('sentinel:devices-changed', { detail: msg.devices }));
+    case 'devices_update': {
+      const myId = getOrCreateDeviceId();
+      const raw = Array.isArray(msg.devices) ? msg.devices : [];
+      const filtered = raw.filter(d => d.id !== myId);
+      updateState('availableDevices', filtered);
+      window.dispatchEvent(new CustomEvent('sentinel:devices-changed', { detail: filtered }));
+
+      if (state.selectedRemoteDevice) {
+        const stillOnline = filtered.find(d => d.id === state.selectedRemoteDevice.id);
+        if (!stillOnline) {
+          const devName = state.selectedRemoteDevice.name;
+          updateState('selectedRemoteDevice', null);
+          updateDeviceIndicatorsUI();
+          window.dispatchEvent(new CustomEvent('sentinel:device-selected', { detail: null }));
+          window.dispatchEvent(new CustomEvent('app:toast', {
+            detail: `⚠️ Устройство «${devName}» отключилось. Воспроизведение переключено на этот компьютер.`
+          }));
+        } else {
+          updateState('selectedRemoteDevice', stillOnline);
+        }
       }
       break;
-
-    case 'devices_update':
-      window.dispatchEvent(new CustomEvent('sentinel:devices-changed', { detail: msg.devices || [] }));
-      break;
+    }
 
     case 'command':
       executeRemoteCommand(msg.command, msg.payload, msg.from_device_id);
       break;
 
-    case 'device_state':
-      // ПК является конечным плеером (player), поэтому входящее состояние других устройств
-      // не должно самовольно сбрасывать локальный трек и очередь.
-      // Сохраняем информацию об устройствах для UI при необходимости.
+    case 'device_state': {
+      const devId = msg.device_id;
+      const dev = msg.device;
+      if (!devId || !dev) break;
+
+      const curList = state.availableDevices || [];
+      const updatedList = curList.map(d => d.id === devId ? { ...d, ...dev } : d);
+      updateState('availableDevices', updatedList);
+      window.dispatchEvent(new CustomEvent('sentinel:devices-changed', { detail: updatedList }));
+
+      // Если это активное выбранное устройство — синхронизируем UI плеера
+      if (state.selectedRemoteDevice && state.selectedRemoteDevice.id === devId) {
+        updateState('selectedRemoteDevice', { ...state.selectedRemoteDevice, ...dev });
+        syncRemoteStateToPlayerUI(dev);
+      }
       break;
+    }
 
     case 'pong':
       break;
   }
 }
 
-/**
- * Выполняет команду, пришедшую со смартфона (Play, Pause, Next, Prev, Seek, Volume...).
- */
 function executeRemoteCommand(command, payload = {}, fromDeviceId = '') {
   const audio = document.getElementById('audioElement');
   console.log(`[Sentinel Connect] Получена удаленная команда: ${command}`, payload);
@@ -234,7 +443,7 @@ function executeRemoteCommand(command, payload = {}, fromDeviceId = '') {
         }
         updateState('isPlaying', true);
         updatePlayButtonsUI(true);
-        toastText = 'Воспроизведение запущено с телефона';
+        toastText = 'Воспроизведение запущено удаленно';
         break;
       }
 
@@ -244,7 +453,7 @@ function executeRemoteCommand(command, payload = {}, fromDeviceId = '') {
         }
         updateState('isPlaying', false);
         updatePlayButtonsUI(false);
-        toastText = 'Пауза с телефона';
+        toastText = 'Пауза (удаленно)';
         break;
       }
 
@@ -253,7 +462,7 @@ function executeRemoteCommand(command, payload = {}, fromDeviceId = '') {
           audio.pause();
           updateState('isPlaying', false);
           updatePlayButtonsUI(false);
-          toastText = 'Пауза с телефона';
+          toastText = 'Пауза (удаленно)';
         } else {
           const hasValidSource = audio && audio.src && audio.src !== window.location.href && !audio.src.endsWith('/null');
           if (!hasValidSource) {
@@ -272,20 +481,20 @@ function executeRemoteCommand(command, payload = {}, fromDeviceId = '') {
           }
           updateState('isPlaying', true);
           updatePlayButtonsUI(true);
-          toastText = 'Воспроизведение запущено с телефона';
+          toastText = 'Воспроизведение запущено удаленно';
         }
         break;
       }
 
       case 'NEXT': {
         nextTrack();
-        toastText = 'Следующий трек (с телефона)';
+        toastText = 'Следующий трек (удаленно)';
         break;
       }
 
       case 'PREV': {
         prevTrack();
-        toastText = 'Предыдущий трек (с телефона)';
+        toastText = 'Предыдущий трек (удаленно)';
         break;
       }
 
@@ -324,7 +533,7 @@ function executeRemoteCommand(command, payload = {}, fromDeviceId = '') {
           playTrack(payload.track, payload.queue || null, false, autoPlay, posSec);
           toastText = autoPlay
             ? `Удаленный запуск: ${payload.track.artist} - ${payload.track.title}`
-            : `Передано с телефона: ${payload.track.artist} - ${payload.track.title}`;
+            : `Передано на ПК: ${payload.track.artist} - ${payload.track.title}`;
         }
         break;
       }
@@ -366,7 +575,6 @@ function executeRemoteCommand(command, payload = {}, fromDeviceId = '') {
         if (payload.bass_boost !== undefined) audioFx.setBassBoost(Number(payload.bass_boost));
         if (payload.reset) audioFx.resetToFlat();
         try { syncEqualizerUI(); } catch (_) {}
-        toastText = 'Эквалайзер изменен с телефона';
         break;
       }
 
@@ -379,7 +587,6 @@ function executeRemoteCommand(command, payload = {}, fromDeviceId = '') {
           }
         }
         try { syncEqualizerUI(); } catch (_) {}
-        toastText = 'Лимитер изменен с телефона';
         break;
       }
     }
@@ -389,10 +596,11 @@ function executeRemoteCommand(command, payload = {}, fromDeviceId = '') {
     if (toastText) {
       window.dispatchEvent(new CustomEvent('app:toast', { detail: `📱 ${toastText}` }));
     }
-    // Даем аудио-стеку применить изменения и отправляем обновленный статус с force = true
     setTimeout(() => {
       isApplyingRemoteState = false;
-      broadcastCurrentState(true);
+      if (!state.selectedRemoteDevice) {
+        broadcastCurrentState(true);
+      }
     }, 80);
   }
 }
@@ -402,12 +610,12 @@ function executeRemoteCommand(command, payload = {}, fromDeviceId = '') {
  */
 export function broadcastCurrentState(force = false) {
   if (isApplyingRemoteState) return;
+  if (state.selectedRemoteDevice) return; // Не перезаписываем статус удаленного устройства
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
   const audio = document.getElementById('audioElement');
   const now = Date.now();
 
-  // Троттлинг отправки тиков прогресса (не чаще раза в 1 секунду), если не форсировано
   if (!force && now - lastProgressBroadcast < 1000) {
     return;
   }
@@ -427,7 +635,7 @@ export function broadcastCurrentState(force = false) {
     action: 'state_update',
     state: {
       is_playing: isPlaying,
-      current_track: state.currentTrack,
+      current_track: state.currentTrack ? { ...state.currentTrack, audio_format: state.currentTrack.audio_format || state.currentTrack.format || 'mp3' } : null,
       position_ms: positionMs,
       duration_ms: durationMs,
       queue: upcomingQueue.slice(0, 100),
@@ -450,26 +658,13 @@ export function broadcastCurrentState(force = false) {
   }
 }
 
-/**
- * Обновляет иконку / индикатор подключения Sentinel Connect в интерфейсе.
- */
 function updateConnectIndicatorUI(online) {
   const indicator = document.getElementById('sentinelConnectBadge');
   if (indicator) {
     indicator.classList.toggle('active', online);
     indicator.title = online
-      ? `Sentinel Connect активен: можно управлять воспроизведением с телефона`
+      ? `Sentinel Connect активен`
       : `Sentinel Connect подключается...`;
-
-    if (!indicator._hasClickListener) {
-      indicator._hasClickListener = true;
-      indicator.addEventListener('click', () => {
-        const text = isConnected
-          ? 'Sentinel Connect активен. Вы можете управлять этим ПК из приложения на Android!'
-          : 'Sentinel Connect: подключение к серверу...';
-        window.dispatchEvent(new CustomEvent('app:toast', { detail: `💻 ${text}` }));
-      });
-    }
   }
 }
 
@@ -480,15 +675,13 @@ if (typeof window !== 'undefined') {
   window.addEventListener('loudness:changed', () => broadcastCurrentState(true));
   window.addEventListener('online', () => initRemoteConnect());
 
-  // Слушаем изменения эквалайзера и лимитеров в реальном времени
   try {
     audioFx.subscribe(() => broadcastCurrentState(true));
   } catch (_) {}
 
-  // Периодический пинг состояния раз в 3 секунды во время воспроизведения
   setInterval(() => {
     const audio = document.getElementById('audioElement');
-    if (audio && !audio.paused && isConnected) {
+    if (audio && !audio.paused && isConnected && !state.selectedRemoteDevice) {
       broadcastCurrentState(false);
     }
   }, 3000);

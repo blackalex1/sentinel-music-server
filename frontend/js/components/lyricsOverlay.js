@@ -29,6 +29,9 @@ export function renderLyricsOverlay() {
         </div>
 
         <div class="lyrics-header-actions">
+          <button class="lyrics-btn-action" id="btnRefreshLyrics" title="Перезагрузить текст (если найден не тот или устарел)">
+            ${icon('refresh', { size: 16 })}
+          </button>
           <button class="lyrics-btn-close" id="btnCloseLyrics" title="Свернуть текст песни (L или Esc)">
             ${icon('close', { size: 18 })}
           </button>

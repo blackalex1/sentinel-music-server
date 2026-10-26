@@ -187,21 +187,26 @@ function renderNowPlayingCard() {
   }
 
   const isPlaying = state.isPlaying;
-  const isFlac = (track.audio_format || '').toLowerCase() === 'flac';
+  const fmt = (track.format || track.audio_format || '').toLowerCase();
+  const isFlac = fmt === 'flac' || fmt === 'wav';
+  const coverUrl = track.cover_url || (typeof track.id === 'number' && track.id > 0 ? `${getApiBase()}/api/covers/${track.id}` : '');
+  const coverHtml = coverUrl
+    ? `<img class="queue-now-playing-cover" src="${coverUrl}" alt="" onerror="this.style.opacity='0.2'" />`
+    : `<div class="queue-now-playing-cover" style="display:flex;align-items:center;justify-content:center;background:var(--bg-card);">${icon('music', { size: 20 })}</div>`;
 
   container.innerHTML = `
-    <img class="queue-now-playing-cover" src="${getApiBase()}/api/covers/${track.id}" alt="" onerror="this.style.opacity='0.2'" />
+    ${coverHtml}
     <div class="queue-now-playing-info">
       <div class="queue-track-title-line">
-        <span class="queue-track-title">${escapeHtml(track.title)}</span>
+        <span class="queue-track-title">${escapeHtml(track.title || 'Без названия')}</span>
         ${isFlac ? '<span class="flac-badge">FLAC</span>' : ''}
       </div>
-      <div class="queue-track-artist">${escapeHtml(track.artist)}</div>
+      <div class="queue-track-artist">${escapeHtml(track.artist || 'Неизвестный исполнитель')}</div>
       <div class="queue-now-playing-meta">
-        <span class="queue-track-album">${escapeHtml(track.album || 'Sentinel Music')}</span>
+        <span class="queue-track-album">${escapeHtml(track.album || track.source_name || 'Sentinel Music')}</span>
         <span class="queue-track-time">${formatTime(track.duration)}</span>
       </div>
-    </div>
+    </div>`;
     <div class="now-playing-bars" style="display: flex;">
       <div class="playing-bar" style="${isPlaying ? '' : 'animation-play-state: paused;'}"></div>
       <div class="playing-bar" style="${isPlaying ? '' : 'animation-play-state: paused;'}"></div>
@@ -247,7 +252,7 @@ function renderUpcomingList() {
     item.className = 'queue-item';
     item.innerHTML = `
       <span class="queue-item-index">${relIdx + 1}</span>
-      <img class="queue-item-cover" src="${getApiBase()}/api/covers/${track.id}" alt="" onerror="this.style.opacity='0.2'" />
+      ${track.cover_url || (typeof track.id === 'number' && track.id > 0) ? `<img class="queue-item-cover" src="${track.cover_url || `${getApiBase()}/api/covers/${track.id}`}" alt="" onerror="this.style.opacity='0.2'" />` : `<div class="queue-item-cover" style="display:flex;align-items:center;justify-content:center;background:var(--bg-card);">${icon('music', { size: 14 })}</div>`}
       <div class="queue-item-details">
         <div class="queue-track-title-line">
           <span class="queue-item-title">${escapeHtml(track.title)}</span>
@@ -329,7 +334,7 @@ function renderHistoryList() {
     item.className = 'queue-item history-item';
     item.innerHTML = `
       <span class="queue-item-play-btn" title="Слушать повторно">${icon('play', { size: 14 })}</span>
-      <img class="queue-item-cover" src="${getApiBase()}/api/covers/${track.id}" alt="" onerror="this.style.opacity='0.2'" />
+      ${track.cover_url || (typeof track.id === 'number' && track.id > 0) ? `<img class="queue-item-cover" src="${track.cover_url || `${getApiBase()}/api/covers/${track.id}`}" alt="" onerror="this.style.opacity='0.2'" />` : `<div class="queue-item-cover" style="display:flex;align-items:center;justify-content:center;background:var(--bg-card);">${icon('music', { size: 14 })}</div>`}
       <div class="queue-item-details">
         <div class="queue-track-title-line">
           <span class="queue-item-title">${escapeHtml(track.title)}</span>

@@ -1,7 +1,80 @@
 import os
-from typing import Generator
+import time
+import threading
+from typing import Generator, Dict, Any
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
+
+# Реестр активных сессий потокового воспроизведения треков:
+# track_id -> {"file_path": str, "last_active": float}
+_ACTIVE_STREAMS: Dict[int, Dict[str, Any]] = {}
+_ACTIVE_STREAMS_LOCK = threading.Lock()
+
+
+def mark_track_streaming(track_id: int, file_path: str):
+    """Регистрирует активность воспроизведения/стриминга трека."""
+    with _ACTIVE_STREAMS_LOCK:
+        _ACTIVE_STREAMS[track_id] = {
+            "file_path": os.path.abspath(file_path),
+            "last_active": time.time()
+        }
+
+
+def is_track_streaming(track_id: int, file_path: str | None = None, ttl_seconds: float = 60.0) -> bool:
+    """
+    Проверяет, стримится ли трек в данный момент (активность за последние ttl_seconds).
+    Если передан file_path — проверяет, что стримится именно этот конкретный файл.
+    """
+    with _ACTIVE_STREAMS_LOCK:
+        info = _ACTIVE_STREAMS.get(track_id)
+        if not info:
+            return False
+        if time.time() - info["last_active"] >= ttl_seconds:
+            _ACTIVE_STREAMS.pop(track_id, None)
+            return False
+        if file_path is not None:
+            return os.path.abspath(file_path) == os.path.abspath(info["file_path"])
+        return True
+
+
+def get_active_stream_path(track_id: int, ttl_seconds: float = 60.0) -> str | None:
+    """
+    Возвращает путь к файлу текущей активной сессии воспроизведения трека.
+    Используется для поддержания непрерывности Range-запросов даже в случае фонового авто-апгрейда.
+    """
+    with _ACTIVE_STREAMS_LOCK:
+        info = _ACTIVE_STREAMS.get(track_id)
+        if not info:
+            return None
+        if time.time() - info["last_active"] < ttl_seconds:
+            path = info["file_path"]
+            if os.path.exists(path):
+                return path
+        return None
+
+
+def clear_active_streams():
+    """Очищает реестр активных стримов (для изоляции тестов и сброса состояния)."""
+    with _ACTIVE_STREAMS_LOCK:
+        _ACTIVE_STREAMS.clear()
+
+
+def schedule_delayed_removal(path: str, delay_seconds: float = 180.0):
+    """
+    Безопасно удаляет устаревший файл после истечения таймера (когда клиент завершит стриминг).
+    Исключает сбои воспроизведения на Windows (WinError 32) и разрывы HTTP Range.
+    """
+    def _delayed():
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                print(f"[DelayedRemoval] Отложенный аудиофайл успешно удален: {path}")
+        except Exception as e:
+            print(f"[DelayedRemoval] Ошибка отложенного удаления {path}: {e}")
+
+    t = threading.Timer(delay_seconds, _delayed)
+    t.daemon = True
+    t.start()
 
 
 def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
@@ -48,16 +121,23 @@ def parse_range_header(range_header: str, file_size: int) -> tuple[int, int]:
 
 def file_chunk_generator(path: str, start: int, chunk_len: int, chunk_size: int = 512 * 1024) -> Generator[bytes, None, None]:
     """Потоково отдает байты файла порциями по 512KB без загрузки файла целиком в RAM."""
-    with open(path, "rb") as f:
-        f.seek(start)
-        bytes_left = chunk_len
-        while bytes_left > 0:
-            read_bytes = min(chunk_size, bytes_left)
-            data = f.read(read_bytes)
-            if not data:
-                break
-            bytes_left -= len(data)
-            yield data
+    try:
+        with open(path, "rb") as f:
+            f.seek(start)
+            bytes_left = chunk_len
+            while bytes_left > 0:
+                read_bytes = min(chunk_size, bytes_left)
+                data = f.read(read_bytes)
+                if not data:
+                    break
+                bytes_left -= len(data)
+                yield data
+    except (GeneratorExit, ConnectionResetError, BrokenPipeError):
+        # Штатное закрытие соединения браузером / веб-плеером
+        return
+    except Exception as e:
+        print(f"[Streamer] Исключение при передаче аудиоданных {path}: {e}")
+        return
 
 
 def stream_audio_file(

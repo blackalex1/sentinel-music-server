@@ -98,14 +98,28 @@ class MusicLibraryWatcher:
             if abs_path in self._pending_files:
                 del self._pending_files[abs_path]
 
+        # Если файл всё ещё существует (или был перезаписан/заменен в рамках атомарной перезаписи) — не удаляем
+        if os.path.exists(abs_path) or os.path.exists(file_path):
+            return
+
         db = self.session_factory()
         try:
             from database.models import Track, PlayHistory, UserReaction, PlaylistTrack
+            from streaming.streamer import is_track_streaming
+
             track = db.query(Track).filter(
                 (Track.file_path == abs_path) | (Track.file_path == file_path)
             ).first()
 
             if track:
+                # Если файл трека уже указывает на другой существующий путь (например, перенесен в Saved_Discoveries или обновлен) — не удаляем!
+                if track.file_path != abs_path and track.file_path != file_path and os.path.exists(track.file_path):
+                    return
+
+                # Если трек прямо сейчас воспроизводится у пользователя — не удаляем его из базы
+                if is_track_streaming(track.id, file_path=abs_path):
+                    return
+
                 t_id = track.id
                 artist = track.artist
                 title = track.title

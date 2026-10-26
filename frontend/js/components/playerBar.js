@@ -14,6 +14,9 @@ export function renderPlayerBar() {
         <div class="player-track-info">
           <div id="playerTrackTitle" class="player-title">Трек не выбран</div>
           <div id="playerTrackArtist" class="player-artist">Sentinel Music</div>
+          <div id="playerDevicePill" class="player-device-pill" style="display: none;" title="Нажмите, чтобы изменить устройство">
+            ${icon('cast', { size: 12 })} <span id="playerDevicePillName">Колонка</span>
+          </div>
         </div>
         <div class="player-reactions">
           <button id="btnPlayerLike" class="btn-like" title="Нравится">
@@ -59,8 +62,11 @@ export function renderPlayerBar() {
         </div>
       </div>
 
-      <!-- Правая секция: эквалайзер/настройки звука, караоке, очередь и громкость -->
+      <!-- Правая секция: устройства, эквалайзер/настройки звука, караоке, очередь и громкость -->
       <div class="player-right">
+        <button id="btnPlayerConnect" class="btn-feature" title="Устройства Sentinel Connect (D)">
+          ${icon('cast', { size: 18 })}
+        </button>
         <button id="btnPlayerEqualizer" class="btn-feature" title="Настройки звука и эквалайзер (E)">
           ${icon('equalizer', { size: 18 })}
         </button>

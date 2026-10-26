@@ -95,9 +95,24 @@ class BufferCleaner:
                 continue
 
             if now_dt >= exp_dt:
+                track_id = r.get("track_id")
+                from streaming.streamer import is_track_streaming
+                if track_id and is_track_streaming(track_id):
+                    # Трек сейчас воспроизводится пользователем — пропускаем в этом цикле очистки
+                    continue
+
+                played_str = r.get("played_in_stream_at")
+                if played_str:
+                    try:
+                        played_dt = datetime.strptime(played_str, "%Y-%m-%d %H:%M:%S")
+                        if (now_dt - played_dt).total_seconds() < 1800:
+                            # Проигрывался менее 30 минут назад — пропускаем
+                            continue
+                    except Exception:
+                        pass
+
                 # Срок истек (3 дня без лайка)
                 file_path = r.get("file_path")
-                track_id = r.get("track_id")
 
                 if file_path and os.path.exists(file_path):
                     try:

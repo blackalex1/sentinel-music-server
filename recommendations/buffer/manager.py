@@ -176,7 +176,19 @@ class DiscoveryBufferManager:
                         os.makedirs(fav_dir, exist_ok=True)
                         filename = os.path.basename(old_path)
                         new_path = os.path.join(fav_dir, filename)
-                        shutil.move(old_path, new_path)
+
+                        from streaming.streamer import is_track_streaming, schedule_delayed_removal
+                        if is_track_streaming(track_id):
+                            # Если трек сейчас активно воспроизводится, копируем файл для непрерывности
+                            # и откладываем удаление оригинала, чтобы избежать WinError 32
+                            shutil.copy2(old_path, new_path)
+                            schedule_delayed_removal(old_path, delay_seconds=300)
+                        else:
+                            try:
+                                shutil.move(old_path, new_path)
+                            except (PermissionError, OSError):
+                                shutil.copy2(old_path, new_path)
+                                schedule_delayed_removal(old_path, delay_seconds=300)
 
                         target_rec["file_path"] = new_path
                         if db:

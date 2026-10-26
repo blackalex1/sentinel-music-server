@@ -10,6 +10,7 @@ import { renderDeleteTrackModal } from './deleteTrackModal.js';
 import { renderUploadTracksModal } from './uploadTracksModal.js';
 import { renderQrConnectModal } from './qrConnectModal.js';
 import { renderEqualizerModal } from './equalizerModal.js';
+import { renderDevicesModal } from './devicesModal.js';
 
 export function renderModals() {
   return `
@@ -22,6 +23,7 @@ export function renderModals() {
       ${renderUploadTracksModal()}
       ${renderQrConnectModal()}
       ${renderEqualizerModal()}
+      ${renderDevicesModal()}
     </div>
   `;
 }

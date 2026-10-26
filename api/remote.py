@@ -151,6 +151,16 @@ class RemoteConnectionManager:
             if k in device.state:
                 device.state[k] = v
 
+        # Normalize audio_format so mobile clients never receive null and crash
+        if isinstance(device.state.get("current_track"), dict):
+            cur_t = device.state["current_track"]
+            if not cur_t.get("audio_format"):
+                cur_t["audio_format"] = cur_t.get("format") or "mp3"
+        if isinstance(device.state.get("queue"), list):
+            for q_t in device.state["queue"]:
+                if isinstance(q_t, dict) and not q_t.get("audio_format"):
+                    q_t["audio_format"] = q_t.get("format") or "mp3"
+
         if device.state.get("current_track"):
             self._last_playback_session[user_id] = {
                 "current_track": device.state.get("current_track"),

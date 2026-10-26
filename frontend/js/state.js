@@ -39,6 +39,10 @@ export const state = {
   lyrics: [], // Array<{ time: number, text: string }>
   activeLyricIndex: -1,
 
+  // Sentinel Connect (Удаленное управление)
+  availableDevices: [],
+  selectedRemoteDevice: null, // null = этот ПК (локально); { id, name, ... } = удаленное устройство
+
   // Навигация
   currentView: 'main', // 'main', 'stream', 'tracks', 'playlists', 'lyrics'
   searchQuery: ''

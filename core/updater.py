@@ -19,7 +19,7 @@ from typing import Tuple, Dict, Any, Optional
 logger = logging.getLogger("sentinel.updater")
 
 SERVER_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-CURRENT_VERSION = "0.0.2"
+CURRENT_VERSION = "0.0.3"
 
 # Проверенные высокоскоростные зеркала GitHub для устойчивости в любых сетях
 GITHUB_REPO_PATH = "blackalex1/sentinel-music-server"

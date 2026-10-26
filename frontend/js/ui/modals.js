@@ -9,7 +9,7 @@ import { showToast, escapeHtml } from './toast.js';
 import { handleTrackDeleted } from '../player.js';
 import { loadLibraryTracks } from './trackList.js';
 import { icon } from '../icons.js';
-import { initRemoteConnect } from '../remote.js';
+import { initRemoteConnect, selectPlaybackDevice, refreshDevicesHttp, requestDevices, getOrCreateDeviceId } from '../remote.js';
 import { switchView } from './navigation.js';
 
 let pendingTrackForPlaylist = null;
@@ -528,7 +528,65 @@ export function setupModals() {
     });
   }
 
+  // --- Настройка модального окна Sentinel Connect (Выбор устройств) ---
+  const btnConnect = document.getElementById('btnPlayerConnect');
+  const pillDevice = document.getElementById('playerDevicePill');
+  const btnCloseDevices = document.getElementById('btnCloseDevicesModal');
+  const modalDevices = document.getElementById('devicesModal');
+  const btnRefreshDevices = document.getElementById('btnRefreshDevicesList');
+  const localCard = document.getElementById('localDeviceCard');
 
+  if (btnConnect) {
+    btnConnect.addEventListener('click', () => openDevicesModal());
+  }
+  if (pillDevice) {
+    pillDevice.addEventListener('click', () => openDevicesModal());
+  }
+  if (btnCloseDevices && modalDevices) {
+    btnCloseDevices.addEventListener('click', () => hideDevicesModal());
+    modalDevices.addEventListener('click', (e) => {
+      if (e.target === modalDevices) hideDevicesModal();
+    });
+  }
+  if (btnRefreshDevices) {
+    btnRefreshDevices.addEventListener('click', () => {
+      refreshDevicesHttp();
+      requestDevices();
+    });
+  }
+  if (localCard) {
+    localCard.addEventListener('click', () => {
+      selectPlaybackDevice(null);
+      hideDevicesModal();
+    });
+  }
+
+  const remoteDevicesList = document.getElementById('remoteDevicesList');
+  if (remoteDevicesList) {
+    remoteDevicesList.addEventListener('click', (e) => {
+      const card = e.target.closest('.device-card');
+      if (!card) return;
+      const devId = card.getAttribute('data-device-id');
+      if (!devId) return;
+      const targetDev = (state.availableDevices || []).find(d => d.id === devId);
+      if (targetDev) {
+        selectPlaybackDevice(targetDev);
+        hideDevicesModal();
+      }
+    });
+  }
+
+  window.addEventListener('sentinel:devices-changed', (e) => {
+    if (modalDevices && modalDevices.classList.contains('active')) {
+      renderDevicesListUI(e.detail || state.availableDevices);
+    }
+  });
+
+  window.addEventListener('sentinel:device-selected', () => {
+    if (modalDevices && modalDevices.classList.contains('active')) {
+      renderDevicesListUI(state.availableDevices);
+    }
+  });
 }
 
 
@@ -770,3 +828,93 @@ export function hideQrModal() {
 }
 
 
+
+
+export function openDevicesModal() {
+  const modal = document.getElementById('devicesModal');
+  if (!modal) return;
+  modal.classList.add('active');
+  renderDevicesListUI(state.availableDevices);
+  refreshDevicesHttp();
+  requestDevices();
+}
+window.openDevicesModal = openDevicesModal;
+
+export function hideDevicesModal() {
+  const modal = document.getElementById('devicesModal');
+  if (modal) modal.classList.remove('active');
+}
+window.hideDevicesModal = hideDevicesModal;
+
+export function renderDevicesListUI(devices) {
+  const container = document.getElementById('remoteDevicesList');
+  if (!container) return;
+
+  const currentSelectedId = state.selectedRemoteDevice ? state.selectedRemoteDevice.id : null;
+  const localCard = document.getElementById('localDeviceCard');
+  const localActiveBadge = document.getElementById('localDeviceActiveBadge');
+  const btnSelectLocal = document.getElementById('btnSelectLocalDevice');
+
+  if (localCard && localActiveBadge && btnSelectLocal) {
+    const isLocalActive = !currentSelectedId;
+    localCard.classList.toggle('active', isLocalActive);
+    localActiveBadge.style.display = isLocalActive ? 'inline-block' : 'none';
+    btnSelectLocal.style.display = isLocalActive ? 'none' : 'inline-block';
+  }
+
+  const rawList = Array.isArray(devices) ? devices : (state.availableDevices || []);
+  const myId = getOrCreateDeviceId();
+  const remoteList = rawList.filter(d => d.id !== myId);
+
+  if (remoteList.length === 0) {
+    container.innerHTML = `
+      <div class="devices-empty-state">
+        <span>Нет доступных устройств в домашней сети</span>
+        <span style="font-size: 0.72rem; color: var(--text-muted, #94a3b8);">Включите Яндекс.Станцию или откройте Sentinel Music на телефоне</span>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = remoteList.map(dev => {
+    const isSelected = currentSelectedId === dev.id;
+    const isPlaying = Boolean(dev.is_playing);
+    const trackName = dev.current_track ? `${escapeHtml(dev.current_track.artist || '')} — ${escapeHtml(dev.current_track.title || 'Трек')}` : null;
+
+    const nameLower = (dev.name || '').toLowerCase();
+    let iconName = 'speaker';
+    let iconClass = 'speaker-icon';
+    if (nameLower.includes('смартфон') || nameLower.includes('телефон') || nameLower.includes('android') || nameLower.includes('pixel') || nameLower.includes('samsung') || nameLower.includes('iphone')) {
+      iconName = 'smartphone';
+      iconClass = 'phone-icon';
+    } else if (nameLower.includes('компьютер') || nameLower.includes('пк') || nameLower.includes('desktop') || nameLower.includes('ноутбук') || nameLower.includes('браузер') || (dev.type === 'player' && !nameLower.includes('станция'))) {
+      iconName = 'monitor';
+      iconClass = 'monitor-icon';
+    }
+
+    const descHtml = isPlaying
+      ? `<span class="device-card-desc playing">${icon('play', { size: 10 })} Играет: ${trackName}</span>`
+      : `<span class="device-card-desc"><span style="color: #4ade80;">●</span> В сети</span>`;
+
+    const actionHtml = isSelected
+      ? `<span class="device-active-badge">Активно</span>`
+      : `<button type="button" class="btn-secondary btn-sm btn-select-remote" data-device-id="${escapeHtml(dev.id)}">Выбрать</button>`;
+
+    return `
+      <div class="device-card ${isSelected ? 'active' : ''}" data-device-id="${escapeHtml(dev.id)}">
+        <div class="device-card-left">
+          <div class="device-type-icon ${iconClass}">
+            ${icon(iconName, { size: 20 })}
+          </div>
+          <div class="device-card-info">
+            <div class="device-card-name">${escapeHtml(dev.name || 'Устройство')}</div>
+            ${descHtml}
+          </div>
+        </div>
+        <div class="device-card-action">
+          ${actionHtml}
+        </div>
+      </div>
+    `;
+  }).join('');
+}

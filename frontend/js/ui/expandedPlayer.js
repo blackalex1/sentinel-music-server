@@ -243,7 +243,7 @@ function updateExpandedTrackInfo(track) {
   if (artistEl) artistEl.textContent = track.artist || 'Sentinel Music';
   if (albumEl) albumEl.textContent = track.album ? `Альбом: ${track.album}` : '';
 
-  const coverUrl = track.cover_url || (track.id ? `${getApiBase()}/api/covers/${track.id}` : '');
+  const coverUrl = track.cover_url || (track.id && typeof track.id === 'number' && track.id > 0 ? `${getApiBase()}/api/covers/${track.id}` : '');
 
   if (coverImg) {
     if (coverUrl) {
@@ -267,10 +267,10 @@ function updateExpandedTrackInfo(track) {
 
   // Обновляем бейджи качества
   if (badgesRow) {
-    const fmt = (track.audio_format || 'mp3').toLowerCase();
+    const fmt = (track.format || track.audio_format || 'mp3').toLowerCase();
     const isFlac = fmt === 'flac' || fmt === 'wav';
     const badgeClass = isFlac ? 'badge-flac' : 'badge-mp3';
-    const bitrateText = isFlac ? 'FLAC • Lossless' : `${track.bitrate || 320} kbps • MP3`;
+    const bitrateText = isFlac ? 'FLAC • Lossless' : `${track.bitrate || 320} kbps • ${fmt.toUpperCase()}`;
     const yearText = track.year ? `<span class="hybrid-badge badge-neutral">${track.year}</span>` : '';
     const loudnessText = typeof track.loudness_lufs === 'number'
       ? `<span class="hybrid-badge badge-neutral" title="Громкость EBU R128: ${track.loudness_lufs} LUFS (Поправка: ${track.gain_db >= 0 ? '+' : ''}${track.gain_db} дБ)">${track.loudness_lufs} LUFS</span>`

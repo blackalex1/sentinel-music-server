@@ -230,8 +230,17 @@ export async function sendReaction(trackId, isLike) {
   return res.json();
 }
 
-export async function fetchLyrics(trackId) {
-  const res = await apiFetch(`/api/lyrics/${trackId}`);
+export async function fetchLyrics(trackId, signal = null) {
+  const options = signal ? { signal } : {};
+  const res = await apiFetch(`/api/lyrics/${trackId}`, options);
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function refreshLyrics(trackId) {
+  const res = await apiFetch(`/api/lyrics/${trackId}/refresh`, {
+    method: 'POST'
+  });
   if (!res.ok) return null;
   return res.json();
 }

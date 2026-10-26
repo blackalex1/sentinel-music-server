@@ -81,6 +81,9 @@ def mock_plugin_network_and_ingestion(monkeypatch):
     monkeypatch.setattr(plugin_manager, "request_track_import", AsyncMock(return_value=True))
     monkeypatch.setattr(plugin_manager, "download_selected_candidate", AsyncMock(return_value=True))
 
+    from streaming.streamer import clear_active_streams
+    clear_active_streams()
+
 
 
 @pytest.fixture(scope="session", autouse=True)

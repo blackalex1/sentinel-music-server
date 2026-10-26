@@ -15,6 +15,8 @@ import { icon } from './icons.js';
 import { showToast } from './ui/toast.js';
 import { showConfirm, showAlert } from './ui/notifications.js';
 import { switchView, registerPluginNavigation } from './ui/navigation.js';
+import { playTrack, togglePlay, pauseTrack, resumeTrack } from './player.js';
+import { toggleCandidatePreview, isCandidatePlaying, isCandidatePreviewSupported, getCandidateStreamUrl } from './candidatePreview.js';
 
 // Карта зарегистрированных точек расширения (location -> Set<renderFn>)
 const extensionPoints = new Map();
@@ -332,6 +334,95 @@ export const Sentinel = {
      */
     emit(eventName, detail = null) {
       window.dispatchEvent(new CustomEvent(eventName, { detail }));
+    }
+  },
+
+  player: {
+    /**
+     * Воспроизводит трек или кандидата из плагина в центральном плеере Sentinel.
+     * @param {Object} track - Объект трека фонотеки или трека-кандидата
+     */
+    playTrack(track) {
+      if (!track) return;
+      if (track.candidate_id && !track.id) {
+        toggleCandidatePreview(track);
+        return;
+      }
+      playTrack(track);
+    },
+
+    /**
+     * Запускает предпрослушивание трека-кандидата из поискового плагина в основном плеере.
+     * @param {Object} candidate - Объект кандидата поиска
+     * @param {HTMLElement} [buttonEl] - Кнопка предпрослушивания для синхронизации UI
+     * @param {HTMLElement} [cardEl] - Карточка кандидата
+     */
+    playCandidate(candidate, buttonEl = null, cardEl = null) {
+      toggleCandidatePreview(candidate, buttonEl, cardEl);
+    },
+
+    /**
+     * Переключает воспроизведение текущего трека (Play / Pause).
+     */
+    togglePlay() {
+      togglePlay();
+    },
+
+    /**
+     * Приостанавливает воспроизведение в основном плеере.
+     */
+    pause() {
+      pauseTrack();
+    },
+
+    /**
+     * Возобновляет воспроизведение в основном плеере.
+     */
+    resume() {
+      resumeTrack();
+    },
+
+    /**
+     * Возвращает текущий воспроизводимый трек.
+     * @returns {Object|null}
+     */
+    getCurrentTrack() {
+      return state.currentTrack || null;
+    },
+
+    /**
+     * Проверяет, играет ли сейчас плеер.
+     * @returns {boolean}
+     */
+    isPlaying() {
+      return Boolean(state.isPlaying);
+    },
+
+    /**
+     * Проверяет, играет ли сейчас данный кандидат.
+     * @param {Object} candidate
+     * @returns {boolean}
+     */
+    isCandidatePlaying(candidate) {
+      return isCandidatePlaying(candidate);
+    },
+
+    /**
+     * Проверяет, поддерживает ли кандидат предпрослушивание.
+     * @param {Object} candidate
+     * @returns {boolean}
+     */
+    isCandidatePreviewSupported(candidate) {
+      return isCandidatePreviewSupported(candidate);
+    },
+
+    /**
+     * Формирует URL потока для кандидата.
+     * @param {Object} candidate
+     * @returns {string}
+     */
+    getCandidateStreamUrl(candidate) {
+      return getCandidateStreamUrl(candidate);
     }
   }
 };

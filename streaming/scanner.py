@@ -156,11 +156,16 @@ def scan_single_file(file_path: str, db: Session) -> Optional[Track]:
 
                         # Удаляем старый файл буфера более низкого качества
                         if old_path and os.path.exists(old_path) and os.path.abspath(old_path) != full_path and is_safe_track_file_path(old_path):
-                            try:
-                                os.remove(old_path)
-                                print(f"[Scanner] [🗑️] Устаревший аудиофайл буфера удален при авто-апгрейде: {old_path}")
-                            except Exception as e:
-                                print(f"[Scanner] Ошибка удаления устаревшего файла {old_path}: {e}")
+                            from streaming.streamer import is_track_streaming, schedule_delayed_removal
+                            if is_track_streaming(cand.id, file_path=old_path):
+                                print(f"[Scanner] Трек #{cand.id} сейчас активно стримится. Откладываем удаление старого файла: {old_path}")
+                                schedule_delayed_removal(old_path, delay_seconds=300)
+                            else:
+                                try:
+                                    os.remove(old_path)
+                                    print(f"[Scanner] [🗑️] Устаревший аудиофайл буфера удален при авто-апгрейде: {old_path}")
+                                except Exception as e:
+                                    print(f"[Scanner] Ошибка удаления устаревшего файла {old_path}: {e}")
 
                             old_lrc = os.path.splitext(old_path)[0] + ".lrc"
                             if os.path.exists(old_lrc) and is_safe_track_file_path(old_lrc):
