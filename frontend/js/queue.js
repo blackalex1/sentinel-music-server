@@ -206,7 +206,7 @@ function renderNowPlayingCard() {
         <span class="queue-track-album">${escapeHtml(track.album || track.source_name || 'Sentinel Music')}</span>
         <span class="queue-track-time">${formatTime(track.duration)}</span>
       </div>
-    </div>`;
+    </div>
     <div class="now-playing-bars" style="display: flex;">
       <div class="playing-bar" style="${isPlaying ? '' : 'animation-play-state: paused;'}"></div>
       <div class="playing-bar" style="${isPlaying ? '' : 'animation-play-state: paused;'}"></div>

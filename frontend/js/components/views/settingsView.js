@@ -121,9 +121,9 @@ export function renderSettingsView() {
                   <button type="button" class="btn-secondary" id="btnCheckAppUpdate" style="padding: 8px 16px; font-size: 0.85rem;">
                     Проверить обновления
                   </button>
-                  <a id="btnDownloadAppUpdate" href="#" target="_blank" class="btn-primary" style="display: none; padding: 8px 18px; font-size: 0.85rem; text-decoration: none; align-items: center; gap: 6px;">
+                  <button type="button" id="btnDownloadAppUpdate" class="btn-primary" style="display: none; padding: 8px 18px; font-size: 0.85rem; align-items: center; gap: 6px; cursor: pointer;">
                     Скачать с GitHub
-                  </a>
+                  </button>
                 </div>
               </div>
               <div id="appUpdateNotes" style="display: none; margin-top: 12px; padding: 10px 12px; background: rgba(0, 0, 0, 0.25); border-radius: 8px; font-size: 0.8rem; color: #cbd5e1; max-height: 100px; overflow-y: auto;"></div>

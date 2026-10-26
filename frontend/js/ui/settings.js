@@ -373,28 +373,47 @@ function escapeHtml(str) {
 /**
  * 5. Проверка и загрузка обновлений с GitHub
  */
-let CURRENT_APP_VERSION = '0.0.2';
+let CURRENT_APP_VERSION = '0.0.3';
+let desktopAppInfo = null;
 const isTauriDesktop = !!(window.__TAURI_INTERNALS__ || window.__TAURI__);
 const GITHUB_DESKTOP_REPO = isTauriDesktop ? 'blackalex1/sentinel-music-desktop' : 'blackalex1/sentinel-music-server';
+
+async function initAppVersionInfo() {
+  const verEl = document.getElementById('appCurrentVersionText');
+  if (isTauriDesktop) {
+    try {
+      const invoke = window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke;
+      if (typeof invoke === 'function') {
+        const info = await invoke('get_app_info');
+        if (info && info.version) {
+          desktopAppInfo = info;
+          CURRENT_APP_VERSION = info.version;
+          if (verEl) verEl.textContent = `v${info.version}`;
+        }
+      }
+    } catch (err) {
+      console.warn('[Desktop] Не удалось получить версию из Tauri:', err);
+    }
+  } else {
+    try {
+      const res = await apiFetch('/api/system/version');
+      if (res.ok) {
+        const info = await res.json();
+        if (info && info.version) {
+          CURRENT_APP_VERSION = info.version;
+          if (verEl) verEl.textContent = `v${info.version}`;
+        }
+      }
+    } catch (_) {}
+  }
+}
 
 function setupAppUpdateSection() {
   const btnCheck = document.getElementById('btnCheckAppUpdate');
   if (btnCheck) {
     btnCheck.addEventListener('click', () => checkAppUpdate(false));
   }
-  // Первоначальное определение актуальной версии сервера при работе в Web
-  if (!isTauriDesktop) {
-    apiFetch('/api/system/version')
-      .then(r => r.ok ? r.json() : null)
-      .then(info => {
-        if (info && info.version) {
-          CURRENT_APP_VERSION = info.version;
-          const verEl = document.getElementById('appCurrentVersionText');
-          if (verEl) verEl.textContent = `v${info.version}`;
-        }
-      })
-      .catch(() => {});
-  }
+  initAppVersionInfo();
 }
 
 async function checkAppUpdate(silent = false) {
@@ -411,16 +430,8 @@ async function checkAppUpdate(silent = false) {
     if (btnCheck) btnCheck.disabled = true;
   }
 
-  // Обновляем версию сервера из API перед проверкой
-  if (!isTauriDesktop) {
-    try {
-      const vRes = await apiFetch('/api/system/version');
-      if (vRes.ok) {
-        const vInfo = await vRes.json();
-        if (vInfo.version) CURRENT_APP_VERSION = vInfo.version;
-      }
-    } catch (_) {}
-  }
+  // Обновляем актуальную версию перед проверкой
+  await initAppVersionInfo();
 
   try {
     const res = await fetch(`https://api.github.com/repos/${GITHUB_DESKTOP_REPO}/releases/latest`, {
@@ -453,26 +464,31 @@ async function checkAppUpdate(silent = false) {
             btnDownload.textContent = `Обновить сервер до v${latestTag}`;
             btnDownload.onclick = (e) => {
               e.preventDefault();
+              e.stopPropagation();
               triggerServerUpdate(latestTag);
             };
           } else {
             btnDownload.textContent = `Открыть v${latestTag} на GitHub`;
             btnDownload.onclick = (e) => {
               e.preventDefault();
+              e.stopPropagation();
               openExternalUrl(data.html_url);
             };
             statusEl.innerHTML += `<div style="margin-top: 4px; color: var(--text-muted); font-size: 0.8rem;">Автообновление доступно администратору сервера.</div>`;
           }
         } else {
           // В приложении Desktop скачиваем и обновляем в 1 клик
+          const isInstalled = !!(desktopAppInfo && desktopAppInfo.is_installed);
           const portableAsset = (data.assets || []).find(a => a.name.toLowerCase().includes('portable') && a.name.endsWith('.exe'));
           const setupAsset = (data.assets || []).find(a => a.name.toLowerCase().includes('setup') && a.name.endsWith('.exe'));
-          const targetAsset = portableAsset || setupAsset;
+          const targetAsset = isInstalled ? (setupAsset || portableAsset) : (portableAsset || setupAsset);
           const downloadUrl = targetAsset ? targetAsset.browser_download_url : data.html_url;
+          const isInstaller = isInstalled || (targetAsset === setupAsset);
 
           btnDownload.textContent = `Обновить приложение до v${latestTag}`;
           btnDownload.onclick = async (e) => {
             e.preventDefault();
+            e.stopPropagation();
             if (!targetAsset) {
               openExternalUrl(downloadUrl);
               return;
@@ -497,7 +513,7 @@ async function checkAppUpdate(silent = false) {
               if (typeof invoke === 'function') {
                 await invoke('install_desktop_update', {
                   downloadUrl: targetAsset.browser_download_url,
-                  isInstaller: !portableAsset
+                  isInstaller: isInstaller
                 });
               } else {
                 openExternalUrl(downloadUrl);

@@ -196,11 +196,21 @@ function seekRelative(deltaSeconds) {
 }
 
 
-// Перехват всех внешних ссылок с target="_blank" для открытия в системном браузере
+// Перехват внешних ссылок с target="_blank" для открытия в системном браузере
 document.addEventListener('click', (e) => {
   const anchor = e.target.closest('a[target="_blank"]');
-  if (anchor && anchor.href && (anchor.href.startsWith('http://') || anchor.href.startsWith('https://'))) {
-    e.preventDefault();
-    openExternalUrl(anchor.href);
-  }
+  if (!anchor || !anchor.href) return;
+  try {
+    const rawHref = anchor.getAttribute('href') || '';
+    if (rawHref === '#' || rawHref.startsWith('javascript:')) return;
+
+    const url = new URL(anchor.href, window.location.href);
+    if (url.origin === window.location.origin || url.hostname === 'tauri.localhost' || url.protocol === 'tauri:') {
+      return;
+    }
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      e.preventDefault();
+      openExternalUrl(anchor.href);
+    }
+  } catch (_) {}
 });
