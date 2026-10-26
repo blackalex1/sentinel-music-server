@@ -19,7 +19,23 @@ from typing import Tuple, Dict, Any, Optional
 logger = logging.getLogger("sentinel.updater")
 
 SERVER_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-CURRENT_VERSION = "0.0.3"
+VERSION_FILE = os.path.join(SERVER_ROOT, "VERSION")
+
+
+def get_current_app_version() -> str:
+    """Читает актуальную версию из server/VERSION (Single Source of Truth)."""
+    try:
+        if os.path.exists(VERSION_FILE):
+            with open(VERSION_FILE, "r", encoding="utf-8") as f:
+                v = f.read().strip()
+                if v:
+                    return v
+    except Exception:
+        pass
+    return "0.0.3"
+
+
+CURRENT_VERSION = get_current_app_version()
 
 # Проверенные высокоскоростные зеркала GitHub для устойчивости в любых сетях
 GITHUB_REPO_PATH = "blackalex1/sentinel-music-server"
@@ -99,7 +115,7 @@ def get_version_info() -> Dict[str, Any]:
     in_docker = is_in_docker()
     commit = get_current_git_commit() if git_repo else None
     return {
-        "version": CURRENT_VERSION,
+        "version": get_current_app_version(),
         "is_git": git_repo,
         "in_docker": in_docker,
         "commit": commit,
