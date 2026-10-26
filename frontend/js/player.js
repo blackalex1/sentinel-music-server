@@ -772,10 +772,6 @@ export function setVolume(val) {
   } else if (audio) {
     audio.volume = v;
   }
-  const fill = document.getElementById('volumeFill');
-  if (fill) fill.style.width = `${v * 100}%`;
-  const expFill = document.getElementById('expandedVolumeFill');
-  if (expFill) expFill.style.width = `${v * 100}%`;
 }
 
 export function toggleMute() {
