@@ -163,6 +163,18 @@ async def add_security_headers(request, call_next):
 # Подключение модульного API роутера
 app.include_router(api_router, prefix="/api")
 
+# Маршрут ACME HTTP-01 челленджа для Let's Encrypt (позволяет валидацию через reverse proxy или порт 8000)
+@app.get("/.well-known/acme-challenge/{token}", include_in_schema=False)
+def serve_acme_challenge(token: str):
+    from core.ssl.challenge_server import ACME_CHALLENGES
+    from fastapi.responses import PlainTextResponse
+    from fastapi import HTTPException
+
+    key_auth = ACME_CHALLENGES.get(token)
+    if key_auth:
+        return PlainTextResponse(key_auth, media_type="text/plain")
+    raise HTTPException(status_code=404, detail="Challenge token not found")
+
 # Загрузка плагинов и монтирование их ассетов и API роутеров
 plugin_manager.load_plugins()
 plugin_manager.mount_plugin_assets(app)
@@ -193,4 +205,5 @@ if __name__ == "__main__":
         ssl_opts["ssl_certfile"] = ssl_cert
         ssl_opts["ssl_keyfile"] = ssl_key
 
-    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=True, **ssl_opts)
+    is_reload = os.getenv("UVICORN_RELOAD", "false").lower() == "true"
+    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=is_reload, **ssl_opts)

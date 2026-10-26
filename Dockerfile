@@ -30,11 +30,11 @@ ENV PYTHONUNBUFFERED=1 \
     WATCHDOG_ENABLED=true \
     WATCHDOG_DEBOUNCE_SECONDS=2.0
 
-EXPOSE 8000
+EXPOSE 8000 80
 
-# Проверка здоровья контейнера
+# Проверка здоровья контейнера (поддержка HTTP и HTTPS)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/api/auth/status || exit 1
+    CMD curl -f http://localhost:8000/api/auth/status || curl -f -k https://localhost:8000/api/auth/status || exit 1
 
-# Запуск приложения через uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Запуск приложения через main.py с автоматической поддержкой SSL
+CMD ["python", "main.py"]

@@ -11,10 +11,11 @@ def run_acme_flow(domain: str, email: str = "", use_staging: bool = False) -> Tu
     Запускает полный цикл получения сертификата Let's Encrypt через HTTP-01 challenge.
     Возвращает: (success: bool, message: str, cert_pem: Optional[str], key_pem: Optional[str])
     """
-    # 1. Запуск временного сервера на 80 порту для ответа Let's Encrypt
+    # 1. Попытка запуска временного сервера на 80 порту для прямого ответа Let's Encrypt
     temp_server = TemporaryAcmeServer(port=80)
-    if not temp_server.start():
-        return False, "Не удалось открыть порт 80 для HTTP-01 проверки Let's Encrypt (порт занят другим процессом или требуются права администратора)", None, None
+    server_started = temp_server.start()
+    if not server_started:
+        logging.info("[ACME Flow] Порт 80 недоступен для временного сервера (занят другим процессом или нет прав). Челлендж будет отдаваться через основной веб-сервер FastAPI.")
 
     try:
         client = AcmeClient(use_staging=use_staging)
@@ -76,4 +77,5 @@ def run_acme_flow(domain: str, email: str = "", use_staging: bool = False) -> Tu
 
         return True, "Сертификат Let's Encrypt успешно получен!", cert_pem, key_pem
     finally:
-        temp_server.stop()
+        if server_started and temp_server:
+            temp_server.stop()
