@@ -1,7 +1,7 @@
 import requests
 from typing import Optional, Dict, Any
 
-from plugins.lyrics.validator import validate_lyrics_match
+from lyrics.validator import validate_lyrics_match
 
 LRCLIB_API_URL = "https://lrclib.net/api"
 USER_AGENT = "MusicService/1.0 (Open-Source Lyrics Engine; +https://github.com/blackalex1)"
