@@ -8,7 +8,7 @@ import { sendReaction, fetchShuffleTracks } from './api.js';
 import { icon } from './icons.js';
 import { syncTrackReactionUI } from './ui/reactions.js';
 import { audioFx } from './audioFx.js';
-import { sendRemoteCommand } from './remote.js';
+import { sendRemoteCommand, setOptimisticPlayback } from './remote.js';
 
 let audio = null;
 let audioCtx = null;
@@ -414,6 +414,7 @@ export function playTrack(track, queueList = null, isStream = false, autoPlay = 
 
   // Если активно удаленное устройство Sentinel Connect (колонка или смартфон)
   if (state.selectedRemoteDevice) {
+    setOptimisticPlayback(track);
     const targetId = state.selectedRemoteDevice.id;
     let effectiveQueue = queueList || state.queue || [track];
     if (state.isShuffle && effectiveQueue.length > 1) {
@@ -671,6 +672,27 @@ export function resumeTrack() {
 
 export async function nextTrack() {
   if (state.selectedRemoteDevice) {
+    // Оптимистичное мгновенное переключение UI плеера на следующий трек из очереди
+    if (state.queue && state.queue.length > 0) {
+      let curIdx = state.queueIndex;
+      if (typeof curIdx !== 'number' || curIdx < 0) {
+        curIdx = state.queue.findIndex(t => state.currentTrack && t.id === state.currentTrack.id);
+      }
+      const nextIdx = (curIdx >= 0 && curIdx < state.queue.length - 1) ? curIdx + 1 : 0;
+      const nextTr = state.queue[nextIdx];
+      if (nextTr) {
+        setOptimisticPlayback(nextTr);
+        updateState('currentTrack', nextTr);
+        updateState('queueIndex', nextIdx);
+        updateState('currentTime', 0);
+        if (nextTr.duration) updateState('duration', nextTr.duration);
+        updateState('isPlaying', true);
+        updateTrackInfoUI(nextTr);
+        updatePlayButtonsUI(true);
+        updateTimelineUI();
+        window.dispatchEvent(new CustomEvent('track:changed', { detail: nextTr }));
+      }
+    }
     sendRemoteCommand(state.selectedRemoteDevice.id, 'NEXT');
     return;
   }
@@ -727,6 +749,33 @@ export async function nextTrack() {
 
 export function prevTrack() {
   if (state.selectedRemoteDevice) {
+    if (state.currentTime > 3) {
+      updateState('currentTime', 0);
+      updateTimelineUI();
+      sendRemoteCommand(state.selectedRemoteDevice.id, 'SEEK', { position_ms: 0, position_seconds: 0 });
+      return;
+    }
+    // Оптимистичное мгновенное переключение UI плеера на предыдущий трек из очереди
+    if (state.queue && state.queue.length > 0) {
+      let curIdx = state.queueIndex;
+      if (typeof curIdx !== 'number' || curIdx < 0) {
+        curIdx = state.queue.findIndex(t => state.currentTrack && t.id === state.currentTrack.id);
+      }
+      const prevIdx = (curIdx > 0) ? curIdx - 1 : (state.queue.length - 1);
+      const prevTr = state.queue[prevIdx];
+      if (prevTr) {
+        setOptimisticPlayback(prevTr);
+        updateState('currentTrack', prevTr);
+        updateState('queueIndex', prevIdx);
+        updateState('currentTime', 0);
+        if (prevTr.duration) updateState('duration', prevTr.duration);
+        updateState('isPlaying', true);
+        updateTrackInfoUI(prevTr);
+        updatePlayButtonsUI(true);
+        updateTimelineUI();
+        window.dispatchEvent(new CustomEvent('track:changed', { detail: prevTr }));
+      }
+    }
     sendRemoteCommand(state.selectedRemoteDevice.id, 'PREV');
     return;
   }

@@ -91,6 +91,9 @@ export function sendRemoteCommand(targetDeviceId, command, payload = {}) {
   // Фолбэк на REST API
   const token = getAuthToken();
   if (token) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      initRemoteConnect();
+    }
     fetch(`${getApiBase()}/api/remote/command`, {
       method: 'POST',
       headers: {
@@ -197,11 +200,34 @@ export function selectPlaybackDevice(device) {
   }
 }
 
+let optimisticActionTimestamp = 0;
+let optimisticTargetTrackId = null;
+
+/**
+ * Фиксирует оптимистичный переход на трек, защищая UI от устаревших пакетов в полете.
+ */
+export function setOptimisticPlayback(track) {
+  optimisticActionTimestamp = Date.now();
+  optimisticTargetTrackId = track ? track.id : null;
+}
+
 /**
  * Синхронизирует состояние удаленного устройства с UI локального плеера.
  */
 export function syncRemoteStateToPlayerUI(dev) {
   if (!dev) return;
+
+  // Защита от устаревших пакетов состояния в полете (stale state)
+  if (optimisticActionTimestamp && (Date.now() - optimisticActionTimestamp < 2000)) {
+    if (dev.current_track && optimisticTargetTrackId && dev.current_track.id !== optimisticTargetTrackId) {
+      // Игнорируем пакет со старым треком, пока колонка переключается
+      return;
+    }
+  }
+  if (dev.current_track && optimisticTargetTrackId && dev.current_track.id === optimisticTargetTrackId) {
+    optimisticActionTimestamp = 0;
+    optimisticTargetTrackId = null;
+  }
 
   if (dev.current_track) {
     updateState('currentTrack', dev.current_track);
@@ -684,6 +710,20 @@ if (typeof window !== 'undefined') {
   window.addEventListener('player:track-change', () => broadcastCurrentState(true));
   window.addEventListener('loudness:changed', () => broadcastCurrentState(true));
   window.addEventListener('online', () => initRemoteConnect());
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        initRemoteConnect();
+      } else {
+        requestDevices();
+      }
+    }
+  });
+  window.addEventListener('focus', () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      initRemoteConnect();
+    }
+  });
 
   try {
     audioFx.subscribe(() => broadcastCurrentState(true));
