@@ -245,9 +245,16 @@ class PluginManager:
         gathered = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_candidates = []
+        seen_ids = set()
         for batch in gathered:
             if isinstance(batch, list):
-                all_candidates.extend(batch)
+                for item in batch:
+                    cid = item.get("candidate_id") or item.get("id")
+                    if cid:
+                        if cid in seen_ids:
+                            continue
+                        seen_ids.add(cid)
+                    all_candidates.append(item)
 
         return all_candidates
 

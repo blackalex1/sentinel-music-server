@@ -522,6 +522,14 @@ function executeRemoteCommand(command, payload = {}, fromDeviceId = '') {
       case 'TRANSFER_PLAYBACK':
       case 'PLAY_TRACK': {
         if (payload.track) {
+          const track = { ...payload.track };
+          const cid = payload.candidate_id || payload.candidateId;
+          if (cid && !track.candidate_id && !track.candidateId) track.candidate_id = cid;
+          const isPrev = payload.is_preview ?? payload.isPreview;
+          if (isPrev !== undefined && track.is_preview === undefined && track.isPreview === undefined) track.is_preview = isPrev;
+          const cov = payload.cover_url || payload.coverUrl;
+          if (cov && !track.cover_url && !track.coverUrl) track.cover_url = cov;
+
           const isTransfer = (command === 'PREPARE_TRACK' || command === 'TRANSFER_PLAYBACK');
           const autoPlay = payload.auto_play !== undefined 
             ? Boolean(payload.auto_play) 
@@ -530,10 +538,10 @@ function executeRemoteCommand(command, payload = {}, fromDeviceId = '') {
             ? Number(payload.position_seconds)
             : ((payload.position_ms !== undefined) ? Number(payload.position_ms) / 1000.0 : 0);
 
-          playTrack(payload.track, payload.queue || null, false, autoPlay, posSec);
+          playTrack(track, payload.queue || null, false, autoPlay, posSec);
           toastText = autoPlay
-            ? `Удаленный запуск: ${payload.track.artist} - ${payload.track.title}`
-            : `Передано на ПК: ${payload.track.artist} - ${payload.track.title}`;
+            ? `Удаленный запуск: ${track.artist || ''} - ${track.title || ''}`
+            : `Передано на ПК: ${track.artist || ''} - ${track.title || ''}`;
         }
         break;
       }

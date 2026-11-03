@@ -157,6 +157,10 @@ export function updateLoudnessBadgeUI() {
   });
 }
 
+export function getAudioElement() {
+  return audio;
+}
+
 export function initPlayer() {
   audio = document.getElementById('audioElement');
   if (!audio) {
@@ -516,11 +520,28 @@ export function playTrack(track, queueList = null, isStream = false, autoPlay = 
   }
 
   const token = getAuthToken();
-  const isPreview = track.is_preview || track.preview_url || (track.id < 0 && track.file_path && track.file_path.startsWith('http'));
+  const cid = track.candidate_id || track.candidateId;
+  const isPreview = Boolean(
+    track.is_preview ||
+    track.isPreview ||
+    track.is_candidate ||
+    track.isCandidate ||
+    track.preview_url ||
+    (cid != null && String(cid).length > 0) ||
+    (typeof track.id === 'number' && track.id < 0) ||
+    (typeof track.id === 'string' && track.id.startsWith('candidate_')) ||
+    (track.file_path && track.file_path.startsWith('http'))
+  );
   const base = getApiBase();
-  const streamUrl = isPreview
-    ? (track.preview_url || track.file_path || track.stream_url)
-    : `${base}/api/stream/${track.id}${token ? `?token=${token}` : ''}`;
+  let streamUrl;
+  if (cid) {
+    const encCid = encodeURIComponent(cid);
+    streamUrl = `${base}/api/tracks/candidates/preview?candidate_id=${encCid}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+  } else if (isPreview && (track.preview_url || track.stream_url || (track.file_path && track.file_path.startsWith('http')))) {
+    streamUrl = track.preview_url || track.stream_url || track.file_path;
+  } else {
+    streamUrl = `${base}/api/stream/${track.id}${token ? `?token=${token}` : ''}`;
+  }
 
   audio.src = streamUrl;
 
@@ -966,8 +987,9 @@ export function updateTrackInfoUI(track) {
   if (title) title.textContent = track.title || 'Без названия';
   if (artist) artist.textContent = track.artist || 'Неизвестный исполнитель';
   if (cover) {
-    if (track.cover_url) {
-      cover.src = track.cover_url;
+    const coverUrl = track.cover_url || track.coverUrl;
+    if (coverUrl) {
+      cover.src = coverUrl;
       cover.style.display = 'block';
     } else if (typeof track.id === 'number' && track.id > 0) {
       cover.src = `${getApiBase()}/api/covers/${track.id}`;
@@ -989,8 +1011,9 @@ export function updateTrackInfoUI(track) {
 function setupMediaSession(track) {
   if ('mediaSession' in navigator) {
     const artwork = [];
-    if (track.cover_url) {
-      artwork.push({ src: track.cover_url, sizes: '512x512', type: 'image/jpeg' });
+    const coverUrl = track.cover_url || track.coverUrl;
+    if (coverUrl) {
+      artwork.push({ src: coverUrl, sizes: '512x512', type: 'image/jpeg' });
     } else if (typeof track.id === 'number' && track.id > 0) {
       artwork.push({ src: `${getApiBase()}/api/covers/${track.id}`, sizes: '512x512', type: 'image/jpeg' });
     }
