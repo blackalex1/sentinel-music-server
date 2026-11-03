@@ -746,8 +746,13 @@ export function prevTrack() {
 }
 
 export function seekPercentage(pct) {
-  if (!audio || !audio.duration) return;
-  audio.currentTime = Math.max(0, Math.min(1, pct)) * audio.duration;
+  const isRemote = Boolean(state.selectedRemoteDevice);
+  const durSec = (!isRemote && audio && !isNaN(audio.duration) && audio.duration > 0)
+    ? audio.duration
+    : (state.duration || (state.currentTrack ? state.currentTrack.duration : 0));
+  if (!durSec || durSec <= 0) return;
+  const target = Math.max(0, Math.min(1, pct)) * durSec;
+  seekTime(target);
 }
 
 export function seekTime(seconds) {
@@ -934,8 +939,9 @@ export function updateTimelineUI() {
   const dur = document.getElementById('timeTotal');
   const fill = document.getElementById('timelineFill');
 
-  const curSec = (audio && !isNaN(audio.currentTime) && audio.currentTime > 0) ? audio.currentTime : (state.currentTime || 0);
-  const durSec = (audio && !isNaN(audio.duration) && audio.duration > 0) ? audio.duration : (state.duration || (state.currentTrack ? state.currentTrack.duration : 0));
+  const isRemote = Boolean(state.selectedRemoteDevice);
+  const curSec = (!isRemote && audio && !isNaN(audio.currentTime) && audio.currentTime > 0) ? audio.currentTime : (state.currentTime || 0);
+  const durSec = (!isRemote && audio && !isNaN(audio.duration) && audio.duration > 0) ? audio.duration : (state.duration || (state.currentTrack ? state.currentTrack.duration : 0));
 
   if (cur) cur.textContent = formatTime(curSec);
   if (dur && durSec > 0) dur.textContent = formatTime(durSec);

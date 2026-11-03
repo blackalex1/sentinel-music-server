@@ -172,8 +172,9 @@ export function selectPlaybackDevice(device) {
   const curQueue = Array.isArray(state.queue) ? state.queue : [];
 
   // Останавливаем локальное воспроизведение на ПК
-  if (audio && !audio.paused) {
-    audio.pause();
+  if (audio) {
+    if (!audio.paused) audio.pause();
+    try { audio.currentTime = 0; } catch (_) {}
   }
 
   updateState('selectedRemoteDevice', device);
@@ -629,10 +630,11 @@ export function broadcastCurrentState(force = false) {
   }
   lastProgressBroadcast = now;
 
-  const isPlaying = (audio && !audio.paused) || Boolean(state.isPlaying);
-  const posSec = (audio && audio.currentTime > 0) ? audio.currentTime : (state.currentTime || 0);
+  const isRemote = Boolean(state.selectedRemoteDevice);
+  const isPlaying = (!isRemote && audio && !audio.paused) || Boolean(state.isPlaying);
+  const posSec = (!isRemote && audio && audio.currentTime > 0) ? audio.currentTime : (state.currentTime || 0);
   const positionMs = Math.round(posSec * 1000);
-  const durSec = (audio && audio.duration) ? audio.duration : (state.duration || (state.currentTrack ? state.currentTrack.duration : 0));
+  const durSec = (!isRemote && audio && audio.duration) ? audio.duration : (state.duration || (state.currentTrack ? state.currentTrack.duration : 0));
   const durationMs = Math.round(durSec * 1000);
 
   const upcomingQueue = (Array.isArray(state.queue) && state.queueIndex >= 0)
