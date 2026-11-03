@@ -38,6 +38,7 @@ export function setupSearch() {
   async function executeSearch(query) {
     const searchId = ++currentSearchId;
     updateState('searchQuery', query);
+    updateState('activePlaylist', null); // Поиск выполняется по всей медиатеке, сбрасываем контекст плейлиста
     disconnectTracksScrollObserver();
 
     if (candidateAbortController) {

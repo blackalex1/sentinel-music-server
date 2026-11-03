@@ -387,10 +387,20 @@ export async function initServerShuffleQueue(seedTrack) {
     const serverTracks = await fetchShuffleTracks(50, mood, [seedTrack.id]);
     if (serverTracks && serverTracks.length > 0 && state.isShuffle && state.currentTrack && state.currentTrack.id === seedTrack.id && !state.activePlaylist && !state.isStreamActive) {
       const filtered = serverTracks.filter(t => t.id !== seedTrack.id);
-      updateState('queue', [seedTrack, ...filtered]);
+      const newQueue = [seedTrack, ...filtered];
+      updateState('queue', newQueue);
       updateState('queueIndex', 0);
       savePlaybackSession(true);
+      window.dispatchEvent(new CustomEvent('queue:updated'));
       console.log(`[Shuffle] Очередь случайного порядка обновлена со всего сервера (${filtered.length} треков)`);
+
+      // Синхронизируем новую случайную очередь со всем сервером на удаленном устройстве (колонке/смартфоне)
+      if (state.selectedRemoteDevice) {
+        sendRemoteCommand(state.selectedRemoteDevice.id, 'SET_QUEUE', {
+          queue: newQueue.slice(0, 50),
+          track_id: seedTrack.id
+        });
+      }
     }
   } catch (err) {
     console.warn('[Shuffle] Ошибка загрузки серверного микса всей фонотеки:', err);
@@ -405,7 +415,10 @@ export function playTrack(track, queueList = null, isStream = false, autoPlay = 
   // Если активно удаленное устройство Sentinel Connect (колонка или смартфон)
   if (state.selectedRemoteDevice) {
     const targetId = state.selectedRemoteDevice.id;
-    const effectiveQueue = queueList || state.queue || [track];
+    let effectiveQueue = queueList || state.queue || [track];
+    if (state.isShuffle && effectiveQueue.length > 1) {
+      effectiveQueue = shuffleListWithFirst(track, effectiveQueue);
+    }
     sendRemoteCommand(targetId, 'PLAY_TRACK', {
       track,
       queue: effectiveQueue.slice(0, 50),
@@ -424,6 +437,12 @@ export function playTrack(track, queueList = null, isStream = false, autoPlay = 
     if (audio && !audio.paused) audio.pause();
     window.dispatchEvent(new CustomEvent('track:changed', { detail: track }));
     window.dispatchEvent(new CustomEvent('queue:updated'));
+
+    // Если режим Shuffle включен и мы в общей фонотеке/поиске (не в плейлисте и не в стриме):
+    // наполняем очередь случайными треками со всего сервера для удаленного устройства!
+    if (state.isShuffle && !state.activePlaylist && !isStream) {
+      initServerShuffleQueue(track);
+    }
     return;
   }
 
