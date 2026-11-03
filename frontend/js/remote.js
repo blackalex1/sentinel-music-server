@@ -200,34 +200,11 @@ export function selectPlaybackDevice(device) {
   }
 }
 
-let optimisticActionTimestamp = 0;
-let optimisticTargetTrackId = null;
-
-/**
- * Фиксирует оптимистичный переход на трек, защищая UI от устаревших пакетов в полете.
- */
-export function setOptimisticPlayback(track) {
-  optimisticActionTimestamp = Date.now();
-  optimisticTargetTrackId = track ? track.id : null;
-}
-
 /**
  * Синхронизирует состояние удаленного устройства с UI локального плеера.
  */
 export function syncRemoteStateToPlayerUI(dev) {
   if (!dev) return;
-
-  // Защита от устаревших пакетов состояния в полете (stale state)
-  if (optimisticActionTimestamp && (Date.now() - optimisticActionTimestamp < 2000)) {
-    if (dev.current_track && optimisticTargetTrackId && dev.current_track.id !== optimisticTargetTrackId) {
-      // Игнорируем пакет со старым треком, пока колонка переключается
-      return;
-    }
-  }
-  if (dev.current_track && optimisticTargetTrackId && dev.current_track.id === optimisticTargetTrackId) {
-    optimisticActionTimestamp = 0;
-    optimisticTargetTrackId = null;
-  }
 
   if (dev.current_track) {
     updateState('currentTrack', dev.current_track);
