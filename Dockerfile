@@ -1,8 +1,8 @@
 # Multi-stage / lightweight Python build for Music Server
 FROM python:3.12-slim
 
-# Установка системных утилит и аудио-библиотек для декодирования и тегов
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Обновление пакетов ОС и установка аудио-библиотек для декодирования и тегов
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
     curl \
@@ -17,8 +17,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Копирование исходного кода сервера
 COPY . .
 
-# Создание каталогов для данных и монтирования музыки
-RUN mkdir -p /app/data /music
+# Создание непривилегированного пользователя и необходимых каталогов
+RUN useradd -u 1000 -m appuser \
+    && mkdir -p /app/data /music \
+    && chown -R appuser:appuser /app /music
 
 # Переменные окружения по умолчанию (переопределяются через docker-compose / .env)
 ENV PYTHONUNBUFFERED=1 \
@@ -35,6 +37,8 @@ EXPOSE 8000 80
 # Проверка здоровья контейнера (поддержка HTTP и HTTPS)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/api/auth/status || curl -f -k https://localhost:8000/api/auth/status || exit 1
+
+USER appuser
 
 # Запуск приложения через main.py с автоматической поддержкой SSL
 CMD ["python", "main.py"]
