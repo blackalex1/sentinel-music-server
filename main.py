@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.openapi.utils import get_openapi
 
 from core.config import settings
 from database.db import engine, Base, SessionLocal
@@ -152,6 +153,20 @@ async def add_security_headers(request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; "
+        "img-src 'self' data: blob: https: http:; "
+        "media-src 'self' data: blob:; "
+        "connect-src 'self' ws: wss: http: https:; "
+        "font-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline';"
+    )
+
+    # Удаляем заголовок Server для предотвращения раскрытия версии сервера (OWASP ZAP 10036)
+    if "server" in response.headers:
+        del response.headers["server"]
+    if "Server" in response.headers:
+        del response.headers["Server"]
 
     # Для интерфейсных файлов отключаем агрессивный кэш браузера, чтобы обновления применялись сразу
     path = request.url.path
@@ -161,7 +176,30 @@ async def add_security_headers(request, call_next):
     return response
 
 # Подключение модульного API роутера
-app.include_router(api_router, prefix="/api")
+app.include_router(api_router, prefix="/api", responses={401: {"description": "Unauthorized"}})
+
+
+def custom_openapi():
+    """Генерирует схему OpenAPI с гарантированным документированием 401 для всех эндпоинтов API (Schemathesis ST103)."""
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    for path, path_item in openapi_schema.get("paths", {}).items():
+        for method, operation in path_item.items():
+            if method.lower() in ("get", "post", "put", "delete", "patch"):
+                responses = operation.setdefault("responses", {})
+                if "401" not in responses and path.startswith("/api"):
+                    responses["401"] = {"description": "Unauthorized"}
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 # Маршрут ACME HTTP-01 челленджа для Let's Encrypt (позволяет валидацию через reverse proxy или порт 8000)
 @app.get("/.well-known/acme-challenge/{token}", include_in_schema=False)
@@ -216,4 +254,4 @@ if __name__ == "__main__":
             raise
 
     is_reload = os.getenv("UVICORN_RELOAD", "false").lower() == "true"
-    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=is_reload, **ssl_opts)
+    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=is_reload, server_header=False, **ssl_opts)

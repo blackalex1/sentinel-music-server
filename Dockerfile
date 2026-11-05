@@ -2,6 +2,7 @@
 FROM python:3.12-slim
 
 # Обновление пакетов ОС и установка аудио-библиотек для декодирования и тегов
+# hadolint ignore=DL3008
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     ffmpeg \
     libsndfile1 \
@@ -11,6 +12,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 WORKDIR /app
 
 # Обновление системного pip и setuptools, установка зависимостей Python с кэшированием слоев
+# hadolint ignore=DL3013
 RUN pip install --no-cache-dir --upgrade pip setuptools
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

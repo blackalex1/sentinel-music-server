@@ -429,12 +429,30 @@ def test_qr_payload_length_restriction(client):
 
 
 def test_security_headers_present(client):
-    """Проверка наличия базовых защитных HTTP-заголовков (nosniff, SAMEORIGIN, Referrer-Policy)."""
+    """Проверка наличия базовых защитных HTTP-заголовков (nosniff, SAMEORIGIN, Referrer-Policy, CSP) и отсутствия утечки Server: uvicorn."""
     res = client.get("/api/auth/status")
     assert res.status_code == 200
     assert res.headers.get("x-content-type-options") == "nosniff"
     assert res.headers.get("x-frame-options") == "SAMEORIGIN"
     assert res.headers.get("referrer-policy") == "strict-origin-when-cross-origin"
+    assert "content-security-policy" in res.headers
+    assert "default-src" in res.headers["content-security-policy"]
+    assert "uvicorn" not in res.headers.get("server", "").lower()
+
+
+def test_openapi_401_responses_documented(client):
+    """Проверка документирования ответа 401 Unauthorized в схеме OpenAPI для всех API-эндпоинтов (Schemathesis ST103)."""
+    res = client.get("/openapi.json")
+    assert res.status_code == 200
+    schema = res.json()
+    paths = schema.get("paths", {})
+    assert len(paths) > 0
+    # Проверяем ключевые эндпоинты на наличие описания 401
+    for p in ["/api/tracks", "/api/playlists", "/api/stream/{track_id}"]:
+        if p in paths:
+            for method, op in paths[p].items():
+                if method.lower() in ("get", "post", "put", "delete"):
+                    assert "401" in op.get("responses", {}), f"Endpoint {method.upper()} {p} missing 401 response in OpenAPI"
 
 
 def test_streaming_path_containment_forbidden(client, auth_headers, db_session):
