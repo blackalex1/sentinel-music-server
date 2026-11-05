@@ -221,4 +221,54 @@ def test_search_candidates_short_query_protection(client, auth_headers):
     assert "короткий" in data.get("message", "")
 
 
+def test_plugin_manager_whitelist_filtering(tmp_path):
+    """Проверяет фильтрацию плагинов по белому списку (allowed_plugins)."""
+    p1 = tmp_path / "plugin_one"
+    p1.mkdir()
+    (p1 / "__init__.py").write_text(
+        "from plugin_system.base import BasePlugin\n"
+        "class P1(BasePlugin):\n"
+        "    name = 'P1'\n"
+        "    version = '1.0'\n"
+    )
+
+    p2 = tmp_path / "plugin_two"
+    p2.mkdir()
+    (p2 / "__init__.py").write_text(
+        "from plugin_system.base import BasePlugin\n"
+        "class P2(BasePlugin):\n"
+        "    name = 'P2'\n"
+        "    version = '1.0'\n"
+    )
+
+    # 1. Без белого списка - загружаются оба
+    pm_all = PluginManager(plugins_dir=str(tmp_path))
+    assert pm_all.load_plugins() == 2
+
+    # 2. С белым списком - загружается только указанный
+    pm_filtered = PluginManager(plugins_dir=str(tmp_path), allowed_plugins=["plugin_one"])
+    assert pm_filtered.load_plugins() == 1
+    assert pm_filtered.plugins[0].name == "P1"
+
+
+def test_plugin_manager_security_path_validation(tmp_path, monkeypatch):
+    """Проверяет защиту от некорректных имен и выхода за пределы доверенной директории."""
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+
+    # Попытка создать плагин с запрещенными символами
+    invalid_name = plugins_dir / "plugin!bad"
+    invalid_name.mkdir()
+    (invalid_name / "__init__.py").write_text(
+        "from plugin_system.base import BasePlugin\n"
+        "class BadPlugin(BasePlugin):\n"
+        "    name = 'Bad'\n"
+    )
+
+    pm = PluginManager(plugins_dir=str(plugins_dir))
+    count = pm.load_plugins()
+    assert count == 0
+    assert len(pm.plugins) == 0
+
+
 

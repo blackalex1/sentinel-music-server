@@ -1,11 +1,24 @@
 import os
 import sys
+import re
 import inspect
 import importlib.util
 import asyncio
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 
 from plugin_system.base import BasePlugin
+
+SAFE_PLUGIN_NAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+def _is_safe_plugin_path(path: str, trusted_base_dir: str) -> bool:
+    """Проверяет, что канонический путь находится строго внутри доверенной базовой директории."""
+    try:
+        real_path = os.path.realpath(os.path.abspath(path))
+        real_base = os.path.realpath(os.path.abspath(trusted_base_dir))
+        return os.path.commonpath([real_path, real_base]) == real_base
+    except (ValueError, OSError):
+        return False
 
 
 class PluginManager:
@@ -14,11 +27,16 @@ class PluginManager:
     Изолирует сторонний и пользовательский функционал от ядра системы.
     """
 
-    def __init__(self, plugins_dir: Optional[str] = None):
+    def __init__(self, plugins_dir: Optional[str] = None, allowed_plugins: Optional[List[str]] = None):
         if plugins_dir is None:
             # По умолчанию server/plugins
             plugins_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "plugins"))
-        self.plugins_dir = plugins_dir
+        self.plugins_dir = os.path.abspath(plugins_dir)
+        self.allowed_plugins: Optional[Set[str]] = set(allowed_plugins) if allowed_plugins is not None else None
+        if self.allowed_plugins is None and "SENTINEL_ALLOWED_PLUGINS" in os.environ:
+            env_val = os.environ.get("SENTINEL_ALLOWED_PLUGINS", "").strip()
+            if env_val:
+                self.allowed_plugins = {p.strip() for p in env_val.split(",") if p.strip()}
         self.plugins: List[BasePlugin] = []
 
     def load_plugins(self) -> int:
@@ -37,14 +55,20 @@ class PluginManager:
             if item.startswith("_") or item.startswith(".") or item.endswith(".example"):
                 continue
 
+            # Валидация имени плагина: белый список символов против path traversal / инъекций
+            if not SAFE_PLUGIN_NAME_REGEX.match(item):
+                print(f"[PluginManager] Предупреждение: имя плагина '{item}' содержит недопустимые символы. Пропуск.")
+                continue
+
+            # Проверка белого списка разрешенных плагинов (если настроен)
+            if self.allowed_plugins is not None and item not in self.allowed_plugins:
+                print(f"[PluginManager] Плагин '{item}' не входит в белый список разрешенных плагинов. Пропуск.")
+                continue
+
             item_path = os.path.join(self.plugins_dir, item)
             file_path = None
-            module_name = None
             search_locations = None
-
             pkg_name = None
-            file_path = None
-            search_locations = None
 
             if os.path.isdir(item_path):
                 init_file = os.path.join(item_path, "__init__.py")
@@ -56,28 +80,31 @@ class PluginManager:
                 file_path = item_path
                 pkg_name = f"plugins.{os.path.splitext(item)[0]}"
 
-            if not pkg_name:
+            if not pkg_name or not file_path:
+                continue
+
+            # Проверка безопасности: путь файла обязан лежать строго внутри доверенной папки plugins/
+            if not _is_safe_plugin_path(file_path, self.plugins_dir):
+                print(f"[PluginManager] Ошибка безопасности: путь плагина '{file_path}' выходит за пределы {self.plugins_dir}. Пропуск.")
                 continue
 
             try:
-                try:
-                    module = importlib.import_module(pkg_name)
-                except Exception:
-                    if search_locations:
-                        spec = importlib.util.spec_from_file_location(
-                            pkg_name,
-                            file_path,
-                            submodule_search_locations=search_locations
-                        )
-                    else:
-                        spec = importlib.util.spec_from_file_location(pkg_name, file_path)
+                # Безопасная загрузка спецификации напрямую из проверенного локального файла (без вызова неконтролируемого importlib.import_module)
+                if search_locations:
+                    spec = importlib.util.spec_from_file_location(
+                        pkg_name,
+                        file_path,
+                        submodule_search_locations=search_locations
+                    )
+                else:
+                    spec = importlib.util.spec_from_file_location(pkg_name, file_path)
 
-                    if spec and spec.loader:
-                        module = importlib.util.module_from_spec(spec)
-                        sys.modules[pkg_name] = module
-                        spec.loader.exec_module(module)
-                    else:
-                        continue
+                if spec and spec.loader:
+                    module = importlib.util.module_from_spec(spec)
+                    sys.modules[pkg_name] = module
+                    spec.loader.exec_module(module)
+                else:
+                    continue
 
                 # Алиас для обратной совместимости
                 sys.modules[f"server_plugin_{item}"] = module
@@ -125,9 +152,16 @@ class PluginManager:
         for item in sorted(os.listdir(self.plugins_dir)):
             if item.startswith("_") or item.startswith("."):
                 continue
+            if not SAFE_PLUGIN_NAME_REGEX.match(item):
+                continue
+            if self.allowed_plugins is not None and item not in self.allowed_plugins:
+                continue
+
             item_path = os.path.join(self.plugins_dir, item)
             if os.path.isdir(item_path):
                 ui_dir = os.path.join(item_path, "ui")
+                if not _is_safe_plugin_path(ui_dir, self.plugins_dir):
+                    continue
                 if os.path.isdir(ui_dir):
                     mount_path = f"/plugins/{item}"
                     app.mount(mount_path, StaticFiles(directory=ui_dir), name=f"plugin_ui_{item}")
