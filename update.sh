@@ -100,16 +100,16 @@ if [[ "$*" == *"--watch"* ]] || [[ "$*" == *"-w"* ]]; then
     exit 0
 fi
 
+# Гарантируем права на директории томов перед git pull / git reset и сборкой
+if [ -d "data" ]; then
+    sudo chmod -R a+rwX data plugins 2>/dev/null || chmod -R a+rwX data plugins 2>/dev/null || true
+fi
+
 pull_updates "main"
 
 # Автоматическая нормализация прав на тома данных для non-root контейнера (UID 1000)
 if [ -d "data" ]; then
-    if [ "$(stat -c '%u' data 2>/dev/null)" = "0" ] || [ -f "data/key.pem" -a "$(stat -c '%u' data/key.pem 2>/dev/null)" = "0" ]; then
-        echo ">> 🔑 Обнаружены файлы тома data, принадлежащие root. Автоматическая передача прав пользователю контейнера (UID 1000)..."
-        sudo chown -R 1000:1000 data plugins 2>/dev/null || true
-        sudo chmod -R u+rwX,g+rX data plugins 2>/dev/null || true
-        [ -f "data/key.pem" ] && sudo chmod 644 data/key.pem 2>/dev/null || true
-    fi
+    sudo chmod -R a+rwX data plugins 2>/dev/null || true
 fi
 
 echo ">> [2/3] 🐳 Применение изменений в Docker..."
