@@ -10,7 +10,8 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 
 WORKDIR /app
 
-# Установка зависимостей Python с кэшированием слоев
+# Обновление системного pip и установка зависимостей Python с кэшированием слоев
+RUN pip install --no-cache-dir --upgrade pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
