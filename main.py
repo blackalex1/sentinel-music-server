@@ -201,9 +201,19 @@ if __name__ == "__main__":
     ssl_key = os.path.join(settings.DATA_DIR, "key.pem")
     ssl_opts = {}
     if os.path.exists(ssl_cert) and os.path.exists(ssl_key):
-        print(f"[Server] Обнаружен SSL-сертификат: запуск по HTTPS на порту {settings.PORT}")
-        ssl_opts["ssl_certfile"] = ssl_cert
-        ssl_opts["ssl_keyfile"] = ssl_key
+        try:
+            # Проверяем доступность чтения файлов перед передачей в uvicorn
+            with open(ssl_cert, "rb"), open(ssl_key, "rb"):
+                pass
+            print(f"[Server] Обнаружен SSL-сертификат: запуск по HTTPS на порту {settings.PORT}")
+            ssl_opts["ssl_certfile"] = ssl_cert
+            ssl_opts["ssl_keyfile"] = ssl_key
+        except PermissionError as e:
+            print(f"[Server ERROR] Ошибка доступа к файлу SSL ({e.filename}): {e}")
+            print("[Server ERROR] Контейнер запущен от непривилегированного пользователя appuser (UID 1000).")
+            print(f"[Server ERROR] Файлы тома на хосте принадлежат root. Выполните на хосте:")
+            print(f"               sudo chown -R 1000:1000 {settings.DATA_DIR}")
+            raise
 
     is_reload = os.getenv("UVICORN_RELOAD", "false").lower() == "true"
     uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=is_reload, **ssl_opts)
