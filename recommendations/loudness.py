@@ -46,13 +46,14 @@ def measure_track_loudness(
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace"
+            stderr=subprocess.PIPE
         )
         try:
-            _, stderr_text = proc.communicate(timeout=timeout_seconds)
+            _, stderr_raw = proc.communicate(timeout=timeout_seconds)
+            if isinstance(stderr_raw, bytes):
+                stderr_text = stderr_raw.decode("utf-8", errors="replace")
+            else:
+                stderr_text = stderr_raw or ""
         except subprocess.TimeoutExpired:
             proc.kill()
             try:
