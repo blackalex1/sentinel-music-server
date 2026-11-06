@@ -283,7 +283,7 @@ export function initRemoteConnect() {
 
     ws.onopen = () => {
       isConnected = true;
-      console.log(`[Sentinel Connect] Подключено к серверу как hybrid (плеер + пульт): ${deviceName} (${deviceId})`);
+      console.log('[Sentinel Connect] Подключено к серверу как hybrid:', deviceName, deviceId);
       updateConnectIndicatorUI(true);
       updateDeviceIndicatorsUI();
 
@@ -422,7 +422,7 @@ function handleIncomingMessage(msg) {
 
 function executeRemoteCommand(command, payload = {}, fromDeviceId = '') {
   const audio = document.getElementById('audioElement');
-  console.log(`[Sentinel Connect] Получена удаленная команда: ${command}`, payload);
+  console.log('[Sentinel Connect] Получена удаленная команда:', command, payload);
 
   let toastText = null;
   isApplyingRemoteState = true;

@@ -35,9 +35,9 @@ export async function loadFrontendPlugins() {
           module.init(Sentinel);
         }
         loadedPlugins.set(p.name, module);
-        console.log(`[PluginLoader] UI плагин «${p.name}» v${p.version} успешно активирован`);
+        console.log('[PluginLoader] UI плагин успешно активирован:', p.name, p.version);
       } catch (err) {
-        console.error(`[PluginLoader] Ошибка загрузки UI плагина «${p.name}»:`, err);
+        console.error('[PluginLoader] Ошибка загрузки UI плагина:', p.name, err);
       }
     }
   } catch (err) {

@@ -2,7 +2,7 @@ import ssl
 import json
 import base64
 import hashlib
-import urllib.request
+import requests
 import logging
 from typing import Tuple, Optional
 from cryptography import x509
@@ -46,31 +46,27 @@ class AcmeClient:
         self.thumbprint = b64url(hashlib.sha256(jwk_json.encode('utf-8')).digest())
 
     def _send_request(self, url: str, data: bytes = None, headers: dict = None, method: str = "POST") -> Tuple[int, dict, dict]:
-        """Отправляет HTTP-запрос к ACME-серверу."""
-        if not url.startswith(("https://", "http://")):
+        """Отправляет защищенный HTTP-запрос к ACME-серверу."""
+        if not url.startswith("https://"):
             raise ValueError(f"Insecure or invalid URL scheme for ACME request: {url}")
         if headers is None:
             headers = {}
-        ctx = ssl.create_default_context()
 
-        req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
-                res_headers = {k.lower(): v for k, v in resp.getheaders()}
-                res_body = resp.read()
-                try:
-                    res_json = json.loads(res_body.decode('utf-8')) if res_body else {}
-                except Exception:
-                    res_json = {"raw": res_body.decode('utf-8', errors='ignore')}
-                return resp.status, res_json, res_headers
-        except urllib.request.HTTPError as e:
-            res_headers = {k.lower(): v for k, v in e.headers.items()}
-            res_body = e.read()
+            resp = requests.request(
+                method=method,
+                url=url,
+                data=data,
+                headers=headers,
+                timeout=15,
+                allow_redirects=False
+            )
+            res_headers = {k.lower(): v for k, v in resp.headers.items()}
             try:
-                res_json = json.loads(res_body.decode('utf-8')) if res_body else {}
+                res_json = resp.json() if resp.content else {}
             except Exception:
-                res_json = {"raw": res_body.decode('utf-8', errors='ignore')}
-            return e.code, res_json, res_headers
+                res_json = {"raw": resp.text}
+            return resp.status_code, res_json, res_headers
         except Exception as e:
             logging.error(f"[ACME Client] Ошибка сети при запросе к {url}: {e}")
             return 0, {}, {}

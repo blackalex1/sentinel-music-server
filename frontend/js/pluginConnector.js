@@ -107,7 +107,7 @@ export const Sentinel = {
           try {
             render(pageContainer);
           } catch (err) {
-            console.error(`[SentinelSDK] Ошибка рендеринга страницы плагина «${id}»:`, err);
+            console.error('[SentinelSDK] Ошибка рендеринга страницы плагина:', id, err);
           }
         }
       }
@@ -256,7 +256,7 @@ export const Sentinel = {
         try {
           fn(container, context);
         } catch (err) {
-          console.error(`[SentinelSDK] Ошибка в расширении точки «${location}»:`, err);
+          console.error('[SentinelSDK] Ошибка в расширении точки:', location, err);
         }
       });
     }
