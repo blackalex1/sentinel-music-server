@@ -154,6 +154,13 @@ async def set_reaction(
     # Оповещаем все зарегистрированные плагины
     await plugin_manager.notify_reaction(track_id, reaction.is_liked, reaction.is_disliked)
 
+    # Синхронизируем реакцию со всеми активными удаленными устройствами в Sentinel Connect
+    try:
+        from api.remote import remote_manager
+        await remote_manager.sync_track_reaction(current_user.id, track_id, reaction.is_liked, reaction.is_disliked)
+    except Exception as e:
+        logger.debug(f"[Stream] Ошибка синхронизации реакции в Sentinel Connect: {e}")
+
     # Если это трек из буфера Потока, закрепляем в фонотеке при лайке или удаляем при дизлайке
     from recommendations.buffer_manager import discovery_buffer_manager
     saved_permanent = discovery_buffer_manager.handle_user_reaction(

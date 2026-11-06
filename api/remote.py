@@ -14,7 +14,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPExce
 from sqlalchemy.orm import Session
 
 from database.db import get_db, SessionLocal
-from database.models import User, SessionToken, UserDevice, utc_now
+from database.models import User, SessionToken, UserDevice, Track, UserReaction, utc_now
 from core.security import get_current_user, decrypt_encrypted_token
 
 logger = logging.getLogger("sentinel.remote")
@@ -139,6 +139,49 @@ class RemoteConnectionManager:
         }
         await self._broadcast_to_user(user_id, msg, exclude_device_id=exclude_device_id)
 
+    def _enrich_track_reactions(self, track_dict: Dict[str, Any], track_id: int):
+        """Обогащает словарь трека актуальным статусом реакций (is_liked, is_disliked) из БД."""
+        try:
+            with SessionLocal() as db:
+                track = db.query(Track.is_liked, Track.is_disliked).filter(Track.id == track_id).first()
+                if track:
+                    track_dict["is_liked"] = bool(track.is_liked)
+                    track_dict["is_disliked"] = bool(track.is_disliked)
+                else:
+                    track_dict.setdefault("is_liked", False)
+                    track_dict.setdefault("is_disliked", False)
+        except Exception as e:
+            logger.debug(f"[Remote] Ошибка обогащения реакций для трека {track_id}: {e}")
+            track_dict.setdefault("is_liked", False)
+            track_dict.setdefault("is_disliked", False)
+
+    async def sync_track_reaction(self, user_id: int, track_id: int, is_liked: bool, is_disliked: bool):
+        """Мгновенно обновляет реакцию в активном треке и очередях всех устройств пользователя."""
+        user_devs = self._connections.get(user_id, {})
+        updated = False
+        for dev in user_devs.values():
+            cur_t = dev.state.get("current_track")
+            if isinstance(cur_t, dict) and cur_t.get("id") == track_id:
+                cur_t["is_liked"] = is_liked
+                cur_t["is_disliked"] = is_disliked
+                updated = True
+
+            queue = dev.state.get("queue")
+            if isinstance(queue, list):
+                for item in queue:
+                    if isinstance(item, dict) and item.get("id") == track_id:
+                        item["is_liked"] = is_liked
+                        item["is_disliked"] = is_disliked
+
+        if updated:
+            for dev in list(user_devs.values()):
+                msg = {
+                    "type": "device_state",
+                    "device_id": dev.device_id,
+                    "device": dev.to_dict()
+                }
+                await self._broadcast_to_user(user_id, msg)
+
     async def update_device_state(self, user_id: int, device_id: str, new_state: Dict[str, Any]):
         """Обновляет состояние плеера устройства и транслирует его всем остальным устройствам."""
         user_devs = self._connections.get(user_id, {})
@@ -151,15 +194,38 @@ class RemoteConnectionManager:
             if k in device.state:
                 device.state[k] = v
 
-        # Normalize audio_format so mobile clients never receive null and crash
+        # Normalize audio_format and enrich reactions so mobile and desktop clients show likes correctly
         if isinstance(device.state.get("current_track"), dict):
             cur_t = device.state["current_track"]
             if not cur_t.get("audio_format"):
                 cur_t["audio_format"] = cur_t.get("format") or "mp3"
+
+            raw_id = cur_t.get("id")
+            if raw_id is not None:
+                try:
+                    tid = int(raw_id)
+                except (ValueError, TypeError):
+                    tid = None
+
+                if tid and tid > 0:
+                    self._enrich_track_reactions(cur_t, tid)
+                else:
+                    cur_t.setdefault("is_liked", False)
+                    cur_t.setdefault("is_disliked", False)
+
         if isinstance(device.state.get("queue"), list):
             for q_t in device.state["queue"]:
-                if isinstance(q_t, dict) and not q_t.get("audio_format"):
-                    q_t["audio_format"] = q_t.get("format") or "mp3"
+                if isinstance(q_t, dict):
+                    if not q_t.get("audio_format"):
+                        q_t["audio_format"] = q_t.get("format") or "mp3"
+                    raw_qid = q_t.get("id")
+                    if raw_qid is not None:
+                        try:
+                            qid = int(raw_qid)
+                        except (ValueError, TypeError):
+                            qid = None
+                        if qid and qid > 0 and ("is_liked" not in q_t or q_t["is_liked"] is None):
+                            self._enrich_track_reactions(q_t, qid)
 
         if device.state.get("current_track"):
             self._last_playback_session[user_id] = {
@@ -187,6 +253,16 @@ class RemoteConnectionManager:
         payload: Optional[Dict[str, Any]] = None
     ) -> bool:
         """Пересылает команду управления целевому плееру."""
+        cmd_upper = command.upper()
+        if cmd_upper == "SET_REACTION" and payload and "track_id" in payload:
+            try:
+                t_id = int(payload.get("track_id"))
+                is_l = bool(payload.get("is_liked", False))
+                is_d = bool(payload.get("is_disliked", False))
+                await self.sync_track_reaction(user_id, t_id, is_l, is_d)
+            except Exception:
+                pass
+
         user_devs = self._connections.get(user_id, {})
         target = user_devs.get(target_device_id)
         if not target:
@@ -196,7 +272,7 @@ class RemoteConnectionManager:
         msg = {
             "type": "command",
             "from_device_id": from_device_id,
-            "command": command.upper(),
+            "command": cmd_upper,
             "payload": payload or {}
         }
         return await self._send_json_safe(target.websocket, msg)
