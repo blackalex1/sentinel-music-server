@@ -1,6 +1,6 @@
 import time
 import json
-import urllib.request
+import requests
 import urllib.parse
 import threading
 import base64
@@ -85,9 +85,10 @@ class DiscoveryEngine:
                 # 1. Поиск ID исполнителя
                 q = urllib.parse.quote(seed)
                 url = f"{api_base}/search/artist?q={q}"
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=4) as resp:
-                    data = json.loads(resp.read().decode())
+                resp = requests.get(url, headers=headers, timeout=4)
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
                 
                 if not data.get("data"):
                     continue
@@ -97,9 +98,10 @@ class DiscoveryEngine:
 
                 # 2. Получение связанных исполнителей
                 rel_url = f"{api_base}/artist/{artist_id}/related"
-                req_rel = urllib.request.Request(rel_url, headers=headers)
-                with urllib.request.urlopen(req_rel, timeout=4) as resp_rel:
-                    rel_data = json.loads(resp_rel.read().decode())
+                resp_rel = requests.get(rel_url, headers=headers, timeout=4)
+                if resp_rel.status_code != 200:
+                    continue
+                rel_data = resp_rel.json()
 
                 related_artists = rel_data.get("data", [])[:3]
 
@@ -111,9 +113,10 @@ class DiscoveryEngine:
                         continue
 
                     top_url = f"{api_base}/artist/{rel_id}/top?limit=3"
-                    req_top = urllib.request.Request(top_url, headers=headers)
-                    with urllib.request.urlopen(req_top, timeout=4) as resp_top:
-                        top_data = json.loads(resp_top.read().decode())
+                    resp_top = requests.get(top_url, headers=headers, timeout=4)
+                    if resp_top.status_code != 200:
+                        continue
+                    top_data = resp_top.json()
 
                     for item in top_data.get("data", []):
                         track_title = item.get("title", "").strip()

@@ -47,6 +47,8 @@ class AcmeClient:
 
     def _send_request(self, url: str, data: bytes = None, headers: dict = None, method: str = "POST") -> Tuple[int, dict, dict]:
         """Отправляет HTTP-запрос к ACME-серверу."""
+        if not url.startswith(("https://", "http://")):
+            raise ValueError(f"Insecure or invalid URL scheme for ACME request: {url}")
         if headers is None:
             headers = {}
         ctx = ssl.create_default_context()
