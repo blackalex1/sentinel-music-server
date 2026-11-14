@@ -59,22 +59,48 @@ class VibeEngine:
                 active_mood = "chill"
 
         # 1. Проверяем слот для Нового Трека (Discovery)
-        # Если discovery_ratio > 0 и сработала вероятность (или ratio >= 1.0)
-        should_discover = False
+        # Если discovery_ratio >= 1.0 — это СТРОГИЙ режим: только треки из интернета / буфера открытий!
         if discovery_ratio >= 1.0:
-            should_discover = True
-        elif discovery_ratio > 0.0 and random.random() < discovery_ratio:
-            should_discover = True
-
-        if should_discover:
-            # Сначала проверяем, есть ли готовый предзагруженный трек из сети в буфере
             from .buffer_manager import discovery_buffer_manager
             buffered_track = discovery_buffer_manager.get_next_buffered_track(self.db, mood=active_mood)
             if buffered_track:
                 return buffered_track
 
-            # Фоллбэк: если буфер еще пуст или докачивается, берем неслушанный трек из фонотеки
-            cand_discovery = discovery_engine.get_discovery_candidate(self.db, mood=active_mood, session_factory=self.session_factory)
+            cand_discovery = discovery_engine.get_discovery_candidate(
+                self.db,
+                mood=active_mood,
+                session_factory=self.session_factory,
+                allow_preview_fallback=True,
+                only_network=True
+            )
+            if self.session_factory:
+                discovery_buffer_manager.session_factory = self.session_factory
+                discovery_buffer_manager.trigger_background_refill()
+
+            if cand_discovery:
+                return cand_discovery
+
+            # В режиме «100% новое» строго запрещено проигрывать локальную медиатеку!
+            return None
+
+        # Для промежуточных соотношений (0.0 < discovery_ratio < 1.0)
+        should_discover = False
+        if discovery_ratio > 0.0 and random.random() < discovery_ratio:
+            should_discover = True
+
+        if should_discover:
+            from .buffer_manager import discovery_buffer_manager
+            buffered_track = discovery_buffer_manager.get_next_buffered_track(self.db, mood=active_mood)
+            if buffered_track:
+                return buffered_track
+
+            cand_discovery = discovery_engine.get_discovery_candidate(
+                self.db,
+                mood=active_mood,
+                session_factory=self.session_factory,
+                allow_preview_fallback=True,
+                only_network=False
+            )
             if self.session_factory:
                 discovery_buffer_manager.session_factory = self.session_factory
                 discovery_buffer_manager.trigger_background_refill()

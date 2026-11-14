@@ -49,6 +49,8 @@ def get_next_stream_track(
     )
 
     if not next_track:
+        if discovery_ratio >= 1.0:
+            raise HTTPException(status_code=404, detail="Нет доступных новых треков из интернета. Проверьте подключение к сети.")
         raise HTTPException(status_code=404, detail="Нет доступных треков для Потока")
 
     return next_track

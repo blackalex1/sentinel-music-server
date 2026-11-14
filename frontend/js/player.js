@@ -487,13 +487,14 @@ export function playTrack(track, queueList = null, isStream = false, autoPlay = 
       updateState('queueIndex', idx >= 0 ? idx : 0);
     }
   } else if (isStream) {
-    // В режиме Потока добавляем каждый трек в очередь для сохранения истории
-    const q = Array.isArray(state.queue) ? state.queue : [];
+    // В режиме Потока изолируем очередь от основной медиатеки!
+    const q = (state.isStreamActive && Array.isArray(state.queue)) ? state.queue : [];
     if (q.length === 0 || q[q.length - 1].id !== track.id) {
       const newQ = [...q, track];
       updateState('queue', newQ);
       updateState('queueIndex', newQ.length - 1);
     }
+    updateState('activePlaylist', null);
   } else if (state.queue.length > 0) {
     const idx = state.queue.findIndex(t => t.id === track.id);
     if (idx >= 0) {
@@ -939,6 +940,9 @@ function onTrackEnded() {
   if (state.repeatMode === 'one') {
     audio.currentTime = 0;
     audio.play();
+  } else if (state.isStreamActive) {
+    // В режиме Потока по окончании любого трека (включая демо-превью из интернета) переходим к следующему
+    nextTrack();
   } else if (state.currentTrack && (state.currentTrack.is_preview || state.currentTrack.is_candidate)) {
     audio.currentTime = 0;
     updateState('isPlaying', false);

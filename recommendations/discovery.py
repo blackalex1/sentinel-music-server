@@ -90,11 +90,19 @@ class DiscoveryEngine:
                     continue
                 data = resp.json()
                 
-                if not data.get("data"):
+                artists = data.get("data", [])
+                if not artists:
                     continue
 
-                artist_id = data["data"][0]["id"]
-                seed_name = data["data"][0]["name"]
+                # Выбираем наиболее релевантного артиста (по фанатам / точному совпадению имени)
+                exact_matches = [a for a in artists if a.get("name", "").strip().lower() == seed.strip().lower()]
+                if exact_matches:
+                    chosen = max(exact_matches, key=lambda a: a.get("nb_fan", 0))
+                else:
+                    chosen = max(artists, key=lambda a: a.get("nb_fan", 0))
+
+                artist_id = chosen["id"]
+                seed_name = chosen["name"]
 
                 # 2. Получение связанных исполнителей
                 rel_url = f"{api_base}/artist/{artist_id}/related"
@@ -103,16 +111,18 @@ class DiscoveryEngine:
                     continue
                 rel_data = resp_rel.json()
 
-                related_artists = rel_data.get("data", [])[:3]
+                related_artists = rel_data.get("data", [])[:4]
+                # Включаем самого исполнителя (для неизвестных хитов) и связанных исполнителей
+                target_artists = [{"id": artist_id, "name": seed_name}] + related_artists
 
                 # 3. Топ-хиты найденных артистов
-                for rel in related_artists:
+                for rel in target_artists:
                     rel_id = rel.get("id")
                     rel_name = rel.get("name")
                     if not rel_id or not rel_name:
                         continue
 
-                    top_url = f"{api_base}/artist/{rel_id}/top?limit=3"
+                    top_url = f"{api_base}/artist/{rel_id}/top?limit=5"
                     resp_top = requests.get(top_url, headers=headers, timeout=4)
                     if resp_top.status_code != 200:
                         continue
@@ -134,8 +144,9 @@ class DiscoveryEngine:
                             .first()
                         )
                         if existing:
-                            continue  # Уже есть у пользователя
+                            continue  # Уже есть у пользователя в фонотеке
 
+                        reason = f"Похоже на {seed_name}" if rel_name != seed_name else f"Открытие от {seed_name}"
                         candidate = {
                             "id": -(1000 + len(new_candidates) + 1),  # Отрицательный виртуальный ID
                             "title": track_title,
@@ -147,7 +158,8 @@ class DiscoveryEngine:
                             "preview_url": preview_url,
                             "cover_url": item.get("album", {}).get("cover_medium") or item.get("album", {}).get("cover_big"),
                             "is_discovery": True,
-                            "discovery_reason": f"Похоже на {seed_name}"
+                            "is_preview": True,
+                            "discovery_reason": reason
                         }
                         new_candidates.append(candidate)
 
@@ -185,18 +197,20 @@ class DiscoveryEngine:
         t = threading.Thread(target=_run, daemon=True, name="DiscoveryRefresher")
         t.start()
 
-    def get_discovery_candidate(self, db: Session, mood: Optional[str] = "default", session_factory=None, allow_preview_fallback: bool = True) -> Optional[Dict[str, Any]]:
+    def get_discovery_candidate(
+        self,
+        db: Session,
+        mood: Optional[str] = "default",
+        session_factory=None,
+        allow_preview_fallback: bool = True,
+        only_network: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """
         Возвращает один трек-открытие:
-        1. Если на сервере отсутствуют плагины скачивания, возвращает 30-секундное превью (Deezer Preview).
-        2. Иначе выбирает неслушанный трек из локальной фонотеки (полный файл) пока фоновый буфер докачивает треки.
+        1. Сначала отдает треки-кандидаты из внешнего музыкального графа (Deezer Preview / Stream).
+        2. При only_network=True гарантирует, что трек НИКОГДА не будет взят из локальной фонотеки.
+        3. Если only_network=False и сеть недоступна, может вернуть непрослушанный трек из фонотеки.
         """
-        now = time.time()
-        with self._lock:
-            # Фоновое обновление внешнего графа для радара рекомендаций
-            if (not self._cache_candidates or now - self._last_refresh_ts > self._cache_ttl) and session_factory:
-                self.refresh_cache_in_background(session_factory)
-
         # Проверяем наличие плагинов скачивания
         has_ingestion = True
         try:
@@ -205,23 +219,44 @@ class DiscoveryEngine:
         except Exception:
             has_ingestion = True
 
-        # Если плагинов скачивания нет — отдаем 30-секундные демки Deezer
-        if not has_ingestion and allow_preview_fallback:
-            with self._lock:
-                if not self._cache_candidates:
-                    seeds = self.get_seed_artists(db)
-                    if not seeds:
-                        seeds = ["Queen", "The Weeknd", "Daft Punk", "Nirvana", "Michael Jackson"]
-                    self._cache_candidates = self._fetch_candidates_from_network(seeds, db)
+        now = time.time()
+        with self._lock:
+            # Если кэш пуст — пытаемся получить кандидатов из сети прямо сейчас
+            if not self._cache_candidates:
+                seeds = self.get_seed_artists(db)
+                if not seeds:
+                    seeds = ["Queen", "The Weeknd", "Daft Punk", "Nirvana", "Michael Jackson"]
+                self._cache_candidates = self._fetch_candidates_from_network(seeds, db)
+                self._last_refresh_ts = now
+            elif now - self._last_refresh_ts > self._cache_ttl and session_factory:
+                self.refresh_cache_in_background(session_factory)
 
-                if self._cache_candidates:
-                    cand = dict(self._cache_candidates.pop(0))
+            # 1. Извлекаем кандидата из сети
+            while self._cache_candidates:
+                cand = dict(self._cache_candidates.pop(0))
+                # Проверяем, чтобы трека не было в локальной фонотеке
+                existing = (
+                    db.query(Track.id)
+                    .filter(
+                        Track.artist.ilike(f"%{cand.get('artist', '')}%"),
+                        Track.title.ilike(f"%{cand.get('title', '')}%")
+                    )
+                    .first()
+                )
+                if not existing:
                     cand["is_preview"] = True
                     reason_base = cand.get("discovery_reason", "Новая музыка")
-                    cand["discovery_reason"] = f"30с демо (нет плагинов скачивания) • {reason_base}"
+                    if not has_ingestion:
+                        cand["discovery_reason"] = f"30с демо (нет плагинов скачивания) • {reason_base}"
+                    elif "30с демо" not in reason_base:
+                        cand["discovery_reason"] = f"30с демо (пока буфер загружается) • {reason_base}"
                     return cand
 
-        # Выбираем неслушанный трек из локальной фонотеки
+        # Если запрошены строго треки из интернета (например, 100% новое) — никогда не берем треки из медиатеки!
+        if only_network:
+            return None
+
+        # Фоллбэк (только если не строгий режим): выбираем неслушанный трек из локальной фонотеки
         query = (
             db.query(Track)
             .outerjoin(PlayHistory, PlayHistory.track_id == Track.id)

@@ -139,11 +139,7 @@ export function initStream() {
  */
 export async function handleOrbClick() {
   if (!state.isStreamActive) {
-    if (state.currentTrack) {
-      await startStreamFromCurrentTrack(state.currentTrack);
-    } else {
-      await startStream();
-    }
+    await startStream();
   } else {
     togglePlay();
   }
@@ -151,8 +147,8 @@ export async function handleOrbClick() {
 
 /**
  * Запускает Поток на основе уже играющего трека (Seed Track).
- * Не прерывает воспроизведение текущего трека, но активирует алгоритмический поток
- * для всех последующих рекомендаций и обновляет визуальный статус.
+ * Не прерывает воспроизведение текущего трека, но изолирует очередь от медиатеки
+ * и активирует алгоритмический поток для всех последующих рекомендаций.
  */
 export async function startStreamFromCurrentTrack(track) {
   if (!track) {
@@ -160,9 +156,13 @@ export async function startStreamFromCurrentTrack(track) {
     return;
   }
 
-  // 1. Активируем режим Потока
+  // 1. Активируем режим Потока и сбрасываем старую очередь библиотеки
   updateState('isStreamActive', true);
   updateStreamButtonsUI(true);
+  updateState('queue', [track]);
+  updateState('queueIndex', 0);
+  updateState('activePlaylist', null);
+  window.dispatchEvent(new CustomEvent('queue:updated'));
 
   // 2. Добавляем трек в недавние ID потока, чтобы избежать повторов
   if (track.id > 0) {
@@ -186,11 +186,15 @@ export async function startStreamFromCurrentTrack(track) {
 }
 
 /**
- * Активирует режим «Поток» и запускает первый трек.
+ * Активирует режим «Поток», сбрасывает старую очередь и запускает первый трек рекомендаций.
  */
 export async function startStream() {
   updateState('isStreamActive', true);
   updateStreamButtonsUI(true);
+  updateState('queue', []);
+  updateState('queueIndex', -1);
+  updateState('activePlaylist', null);
+  window.dispatchEvent(new CustomEvent('queue:updated'));
   await loadNextStreamTrack();
 }
 
@@ -250,6 +254,12 @@ export async function loadNextStreamTrack() {
 
     if (track) {
       playTrack(track, null, true);
+    } else {
+      if (discoveryRatio >= 1.0) {
+        showToast('Не удалось загрузить новые треки из интернета. Проверьте сеть или работу плагинов.', 'alert');
+      } else {
+        showToast('Нет доступных треков для Потока', 'alert');
+      }
     }
   } catch (err) {
     console.warn('Не удалось загрузить следующий трек Потока:', err);
@@ -312,6 +322,11 @@ function initDiscoveryChips() {
       window.dispatchEvent(new CustomEvent('app:toast', {
         detail: `Частота новых треков: ${label}`
       }));
+
+      // Если Поток уже активен — немедленно переключаем трек в соответствии с новой частотой открытий!
+      if (state.isStreamActive) {
+        loadNextStreamTrack();
+      }
     });
   });
 }

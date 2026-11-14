@@ -244,3 +244,69 @@ def test_stream_capability_and_preview_fallback(client, auth_headers, db_session
     assert cand["is_preview"] is True
     assert "30с демо" in cand["discovery_reason"]
     assert cand["preview_url"] == "https://cdns-preview.deezer.com/stream.mp3"
+
+
+def test_vibe_engine_100_percent_discovery_never_returns_local_tracks(db_session, monkeypatch):
+    """
+    Проверяет, что при discovery_ratio=1.0 Поток возвращает ТОЛЬКО новинки из сети / буфера
+    и ни при каких обстоятельствах не подмешивает треки из локальной медиатеки.
+    """
+    from recommendations.vibe_engine import VibeEngine
+    from recommendations.discovery import discovery_engine
+
+    # Добавляем локальные треки в фонотеку
+    t_local = Track(
+        title="My Local Song",
+        artist="Local Artist",
+        duration=200.0,
+        audio_format="mp3",
+        file_path="/music/local.mp3",
+        is_discovery=False
+    )
+    db_session.add(t_local)
+    db_session.commit()
+
+    engine = VibeEngine(db_session)
+
+    # 1. При наличии сетевого кандидата — возвращается сетевой кандидат
+    discovery_engine._cache_candidates = [
+        {
+            "id": -2001,
+            "title": "Internet Fresh Hit",
+            "artist": "Internet Artist",
+            "duration": 30.0,
+            "preview_url": "https://network.preview/hit.mp3",
+            "file_path": "https://network.preview/hit.mp3",
+            "is_discovery": True,
+            "discovery_reason": "Fresh from web"
+        }
+    ]
+
+    track_100 = engine.get_next_vibe_track(discovery_ratio=1.0)
+    assert track_100 is not None
+    assert track_100["id"] == -2001
+    assert track_100["artist"] == "Internet Artist"
+
+    # 2. Если сетевых треков нет (пустой кэш и сеть не вернула) — возвращает None, а НЕ локальную медиатеку!
+    discovery_engine._cache_candidates = []
+    monkeypatch.setattr(discovery_engine, "_fetch_candidates_from_network", lambda seeds, db: [])
+
+    track_empty = engine.get_next_vibe_track(discovery_ratio=1.0)
+    assert track_empty is None  # Ни в коем случае не t_local!
+
+    # 3. При 0% (Только знакомое) — штатно играет локальная медиатека
+    track_0 = engine.get_next_vibe_track(discovery_ratio=0.0)
+    assert track_0 is not None
+    assert track_0.id == t_local.id
+
+
+def test_stream_api_100_percent_discovery_status(client, auth_headers, db_session, monkeypatch):
+    """Проверяет корректное сообщение об ошибке в API при недоступности сети на 100% новизне."""
+    from recommendations.discovery import discovery_engine
+
+    discovery_engine._cache_candidates = []
+    monkeypatch.setattr(discovery_engine, "_fetch_candidates_from_network", lambda seeds, db: [])
+
+    res = client.get("/api/stream/next?discovery_ratio=1.0", headers=auth_headers)
+    assert res.status_code == 404
+    assert "интернета" in res.json()["detail"]
