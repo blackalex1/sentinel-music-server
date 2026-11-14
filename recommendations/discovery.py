@@ -28,48 +28,111 @@ class DiscoveryEngine:
         self._lock = threading.RLock()
         self._is_refreshing = False
 
-    def get_seed_artists(self, db: Session, limit: int = 5) -> List[str]:
-        """Определяет ключевых исполнителей вкусового профиля пользователя."""
-        # 1. Сначала проверяем лайки пользователя
-        liked_artists = (
-            db.query(Track.artist)
-            .join(UserReaction, UserReaction.track_id == Track.id)
-            .filter(UserReaction.is_liked == True)
-            .group_by(Track.artist)
-            .order_by(func.count(Track.id).desc())
-            .limit(limit)
-            .all()
-        )
-        seeds = [a[0] for a in liked_artists if a[0]]
+    def get_seed_artists(self, db: Session, limit: int = 5, mood: Optional[str] = None) -> List[str]:
+        """Определяет ключевых исполнителей вкусового профиля пользователя с учетом настроения."""
+        seeds = []
+        active_mood = mood if (mood and mood not in ("default", "all")) else None
+
+        # 1. Сначала проверяем лайки пользователя (с фильтром настроения, если задано)
+        if active_mood:
+            liked_mood_q = (
+                db.query(Track.artist)
+                .join(UserReaction, UserReaction.track_id == Track.id)
+                .filter(UserReaction.is_liked == True)
+            )
+            liked_mood_artists = (
+                apply_mood_filter(liked_mood_q, active_mood)
+                .group_by(Track.artist)
+                .order_by(func.count(Track.id).desc())
+                .limit(limit)
+                .all()
+            )
+            seeds = [a[0] for a in liked_mood_artists if a[0]]
+
+        if len(seeds) < limit:
+            liked_artists = (
+                db.query(Track.artist)
+                .join(UserReaction, UserReaction.track_id == Track.id)
+                .filter(UserReaction.is_liked == True)
+                .group_by(Track.artist)
+                .order_by(func.count(Track.id).desc())
+                .limit(limit)
+                .all()
+            )
+            for a in liked_artists:
+                if a[0] and a[0] not in seeds:
+                    seeds.append(a[0])
+
         if len(seeds) >= 3:
             return seeds[:limit]
 
         # 2. Если лайков мало, проверяем историю прослушиваний
-        history_artists = (
-            db.query(Track.artist)
-            .join(PlayHistory, PlayHistory.track_id == Track.id)
-            .group_by(Track.artist)
-            .order_by(func.count(PlayHistory.id).desc())
-            .limit(limit)
-            .all()
-        )
-        for a in history_artists:
-            if a[0] and a[0] not in seeds:
-                seeds.append(a[0])
+        if active_mood and len(seeds) < limit:
+            history_mood_q = (
+                db.query(Track.artist)
+                .join(PlayHistory, PlayHistory.track_id == Track.id)
+            )
+            history_mood_artists = (
+                apply_mood_filter(history_mood_q, active_mood)
+                .group_by(Track.artist)
+                .order_by(func.count(PlayHistory.id).desc())
+                .limit(limit)
+                .all()
+            )
+            for a in history_mood_artists:
+                if a[0] and a[0] not in seeds:
+                    seeds.append(a[0])
+
+        if len(seeds) < limit:
+            history_artists = (
+                db.query(Track.artist)
+                .join(PlayHistory, PlayHistory.track_id == Track.id)
+                .group_by(Track.artist)
+                .order_by(func.count(PlayHistory.id).desc())
+                .limit(limit)
+                .all()
+            )
+            for a in history_artists:
+                if a[0] and a[0] not in seeds:
+                    seeds.append(a[0])
+
         if len(seeds) >= 3:
             return seeds[:limit]
 
         # 3. Базовый фоллбэк: артисты с наибольшим числом треков в библиотеке
-        top_library = (
-            db.query(Track.artist)
-            .group_by(Track.artist)
-            .order_by(func.count(Track.id).desc())
-            .limit(limit)
-            .all()
-        )
-        for a in top_library:
-            if a[0] and a[0] not in seeds:
-                seeds.append(a[0])
+        if active_mood and len(seeds) < limit:
+            top_library_mood_q = apply_mood_filter(db.query(Track.artist), active_mood)
+            top_library_mood = (
+                top_library_mood_q
+                .group_by(Track.artist)
+                .order_by(func.count(Track.id).desc())
+                .limit(limit)
+                .all()
+            )
+            for a in top_library_mood:
+                if a[0] and a[0] not in seeds:
+                    seeds.append(a[0])
+
+        if len(seeds) < limit:
+            top_library = (
+                db.query(Track.artist)
+                .group_by(Track.artist)
+                .order_by(func.count(Track.id).desc())
+                .limit(limit)
+                .all()
+            )
+            for a in top_library:
+                if a[0] and a[0] not in seeds:
+                    seeds.append(a[0])
+
+        if not seeds:
+            mood_defaults = {
+                "energy": ["The Prodigy", "Metallica", "Skrillex", "AC/DC", "Linkin Park"],
+                "chill": ["Bonobo", "Tycho", "Massive Attack", "Norah Jones", "Moby"],
+                "happy": ["Pharrell Williams", "Bruno Mars", "Daft Punk", "Earth, Wind & Fire", "Dua Lipa"],
+                "sad": ["Radiohead", "Adele", "Lana Del Rey", "Billie Eilish", "Coldplay"],
+            }
+            seeds = mood_defaults.get(active_mood, ["Queen", "The Weeknd", "Daft Punk", "Nirvana", "Michael Jackson"])
 
         return seeds[:limit]
 
@@ -223,9 +286,7 @@ class DiscoveryEngine:
         with self._lock:
             # Если кэш пуст — пытаемся получить кандидатов из сети прямо сейчас
             if not self._cache_candidates:
-                seeds = self.get_seed_artists(db)
-                if not seeds:
-                    seeds = ["Queen", "The Weeknd", "Daft Punk", "Nirvana", "Michael Jackson"]
+                seeds = self.get_seed_artists(db, mood=mood)
                 self._cache_candidates = self._fetch_candidates_from_network(seeds, db)
                 self._last_refresh_ts = now
             elif now - self._last_refresh_ts > self._cache_ttl and session_factory:

@@ -310,3 +310,48 @@ def test_stream_api_100_percent_discovery_status(client, auth_headers, db_sessio
     res = client.get("/api/stream/next?discovery_ratio=1.0", headers=auth_headers)
     assert res.status_code == 404
     assert "интернета" in res.json()["detail"]
+
+
+def test_vibe_engine_personalization_boosts_liked_track(db_session):
+    """Проверяет, что конкретный лайкнутый трек получает приоритетный персональный буст."""
+    from recommendations.vibe_engine import VibeEngine
+    from database.models import UserReaction
+
+    t1 = Track(title="Liked Hit", artist="Same Artist", duration=180, audio_format="mp3", file_path="t1.mp3", bpm=120.0, energy=0.7)
+    t2 = Track(title="Normal Track", artist="Same Artist", duration=180, audio_format="mp3", file_path="t2.mp3", bpm=120.0, energy=0.7)
+    db_session.add_all([t1, t2])
+    db_session.commit()
+
+    # Лайкаем именно t1
+    rx = UserReaction(track_id=t1.id, is_liked=True)
+    db_session.add(rx)
+    db_session.commit()
+
+    engine = VibeEngine(db_session)
+    # Запускаем выборку несколько раз для статистической надежности
+    results = [engine.get_next_vibe_track(discovery_ratio=0.0).id for _ in range(10)]
+    assert t1.id in results
+    assert results.count(t1.id) > results.count(t2.id)
+
+
+def test_seed_artists_filter_by_mood(db_session):
+    """Проверяет, что сид-артисты для рекомендаций из интернета фильтруются по целевому настроению."""
+    from recommendations.discovery import discovery_engine
+    from database.models import UserReaction
+
+    t_chill = Track(title="Chill Track", artist="Chill Master", duration=180, audio_format="mp3", file_path="c.mp3", bpm=80.0, energy=0.3, loudness_lufs=-12.0)
+    t_energy = Track(title="Energy Track", artist="Energy Rocker", duration=180, audio_format="mp3", file_path="e.mp3", bpm=135.0, energy=0.9, loudness_lufs=-5.0)
+    db_session.add_all([t_chill, t_energy])
+    db_session.commit()
+
+    db_session.add_all([
+        UserReaction(track_id=t_chill.id, is_liked=True),
+        UserReaction(track_id=t_energy.id, is_liked=True)
+    ])
+    db_session.commit()
+
+    seeds_chill = discovery_engine.get_seed_artists(db_session, limit=2, mood="chill")
+    assert "Chill Master" in seeds_chill
+
+    seeds_energy = discovery_engine.get_seed_artists(db_session, limit=2, mood="energy")
+    assert "Energy Rocker" in seeds_energy

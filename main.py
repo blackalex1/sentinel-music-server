@@ -94,6 +94,12 @@ async def lifespan(app: FastAPI):
             added = await asyncio.to_thread(do_scan)
             if added > 0:
                 print(f"[Server Startup] Автосканирование завершено: добавлено {added} новых треков")
+            # Автоматический запуск фонового психоакустического анализа для неразмеченных треков
+            try:
+                from recommendations.analyzer import library_analyzer
+                library_analyzer.start_analysis()
+            except Exception as e:
+                print(f"[Server Startup] Фоновый запуск анализатора: {e}")
         except Exception as e:
             print(f"[Server Startup] Ошибка автосканирования: {e}")
 

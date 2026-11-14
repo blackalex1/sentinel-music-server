@@ -138,19 +138,23 @@ class VibeEngine:
         candidates = mood_filtered_query.order_by(func.random()).limit(100).all()
 
         # Если в выбранном настроении кандидаты закончились из-за кулдауна сессии,
-        # сбрасываем recent_ids (но оставляем бан дизлайков и текущий трек)
+        # сбрасываем recent_ids, но СТРОГО сохраняем целевой фильтр настроения!
         if not candidates:
             fb_query = self.db.query(Track).filter(Track.is_discovery == False).filter(~Track.id.in_(disliked_subquery))
             if current_track_id:
                 fb_query = fb_query.filter(Track.id != current_track_id)
-            candidates = fb_query.order_by(func.random()).limit(100).all()
+            mood_fb_query = apply_mood_filter(fb_query, active_mood)
+            candidates = mood_fb_query.order_by(func.random()).limit(100).all()
+
             if not candidates:
                 cand_discovery = discovery_engine.get_discovery_candidate(
                     self.db, mood=active_mood, session_factory=self.session_factory, allow_preview_fallback=True
                 )
                 if cand_discovery:
                     return cand_discovery
-                return None
+                candidates = fb_query.order_by(func.random()).limit(100).all()
+                if not candidates:
+                    return None
 
         current_track = (
             self.db.query(Track).filter(Track.id == current_track_id).first()
@@ -161,8 +165,18 @@ class VibeEngine:
             if current_track and current_track.embedding_json else None
         )
 
-        # Список любимых артистов кандидатов (лайки) через точечный JOIN
+        # Данные персонализации: лайки треков, любимые артисты и история
+        candidate_ids = {c.id for c in candidates}
         candidate_artists = {c.artist for c in candidates if c.artist}
+
+        liked_track_ids = set()
+        if candidate_ids:
+            liked_track_ids = {
+                row[0] for row in self.db.query(UserReaction.track_id)
+                .filter(UserReaction.is_liked == True, UserReaction.track_id.in_(candidate_ids))
+                .all()
+            }
+
         liked_artists = set()
         if candidate_artists:
             liked_artists = {
@@ -172,6 +186,16 @@ class VibeEngine:
                 .distinct()
                 .all()
             }
+
+        from database.models import PlayHistory
+        play_counts = {}
+        if candidate_ids:
+            play_counts = dict(
+                self.db.query(PlayHistory.track_id, func.count(PlayHistory.id))
+                .filter(PlayHistory.track_id.in_(candidate_ids))
+                .group_by(PlayHistory.track_id)
+                .all()
+            )
 
         scored_candidates = []
         for cand in candidates:
@@ -190,9 +214,18 @@ class VibeEngine:
                 bpm_diff = abs(current_track.bpm - cand.bpm)
                 score -= min(1.0, bpm_diff / 50.0)
 
-            # 3. Буст любимых артистов
-            if cand.artist in liked_artists:
-                score += 1.3
+            # 3. Персонализация: Буст любимых треков и артистов
+            if cand.id in liked_track_ids:
+                score += 2.2  # Сильный приоритет конкретным лайкнутым трекам
+            elif cand.artist in liked_artists:
+                score += 1.3  # Приоритет трекам любимого артиста
+
+            # 4. Персонализация: Буст за историю прослушиваний
+            pc = play_counts.get(cand.id, 0)
+            if pc > 0:
+                score += min(1.5, math.log1p(pc) * 0.5)
+
+            # 5. Точность попадания в целевое настроение
 
             # 4. Точность попадания в целевое настроение
             if active_mood == "energy" and cand.energy is not None:
@@ -209,8 +242,12 @@ class VibeEngine:
             final_score = max(0.1, score * noise)
             scored_candidates.append((final_score, cand))
 
-        # Выбираем лучший трек из топ-3 кандидатов для разнообразия
-        scored_candidates.sort(key=lambda x: x[0], reverse=True)
-        top_candidates = scored_candidates[:3]
+        # Взвешенный вероятностный выбор среди топ-кандидатов с учетом персонализации
+        if not scored_candidates:
+            return candidates[0]
 
-        return random.choice(top_candidates)[1] if top_candidates else candidates[0]
+        scored_candidates.sort(key=lambda x: x[0], reverse=True)
+        top_candidates = scored_candidates[:min(5, len(scored_candidates))]
+        weights = [max(0.01, score) for score, _ in top_candidates]
+        chosen = random.choices([c for _, c in top_candidates], weights=weights, k=1)[0]
+        return chosen

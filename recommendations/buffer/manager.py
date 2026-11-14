@@ -110,13 +110,31 @@ class DiscoveryBufferManager:
         if not candidates:
             return None
 
-        # Выбираем первого кандидата
-        chosen_rec = candidates[0]
-        track_id = chosen_rec.get("track_id")
+        # Если задано настроение — ищем в буфере трек, соответствующий этому настроению
+        chosen_rec = None
+        chosen_track = None
+        if mood and mood not in ("default", "all"):
+            from recommendations.mood import classify_track_moods
+            for cand_rec in candidates:
+                tid = cand_rec.get("track_id")
+                t = db.query(Track).filter(Track.id == tid).first()
+                if t:
+                    track_moods = classify_track_moods(t)
+                    if mood in track_moods:
+                        chosen_rec = cand_rec
+                        chosen_track = t
+                        break
 
-        track = db.query(Track).filter(Track.id == track_id).first()
-        if not track:
+        # Если трек под настроение в буфере не найден, берем первого готового кандидата
+        if not chosen_rec:
+            chosen_rec = candidates[0]
+            track_id = chosen_rec.get("track_id")
+            chosen_track = db.query(Track).filter(Track.id == track_id).first()
+
+        if not chosen_track:
             return None
+
+        track = chosen_track
 
         # Переводим статус в 'played'
         with self._lock:
