@@ -199,6 +199,9 @@ def test_remote_websocket_lifecycle(client, auth_user_and_token):
                 "current_track": {"id": 10, "title": "Online Track", "artist": "Online Artist"}
             }
         })
+        # Синхронизирующий пинг для гарантии обработки очереди событий сервера
+        ws.send_json({"action": "ping"})
+        ws.receive_json()
 
         # Проверяем, что менеджер обновил внутреннее состояние
         devs = remote_manager.get_user_devices(user.id)

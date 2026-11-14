@@ -6,7 +6,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 
 from database.models import Track, UserReaction, PlayHistory
-from .embeddings import deserialize_vector
+from database.vector_index import find_nearest_tracks
+from .embeddings import (
+    deserialize_vector,
+    compute_user_taste_centroid,
+    update_session_drift_vector
+)
 from .discovery import discovery_engine
 from .mood import apply_mood_filter
 
@@ -137,8 +142,37 @@ class VibeEngine:
         # Применяем фильтр настроения к выборке
         mood_filtered_query = apply_mood_filter(query, active_mood)
 
-        # Выбираем случайный пул из 100 подходящих кандидатов по всей библиотеке
-        candidates = mood_filtered_query.order_by(func.random()).limit(100).all()
+        current_track = (
+            self.db.query(Track).filter(Track.id == current_track_id).first()
+            if current_track_id else None
+        )
+        curr_vec = (
+            deserialize_vector(current_track.embedding_json)
+            if current_track and current_track.embedding_json else None
+        )
+
+        # 4. Вычисление центроида вкуса пользователя и направляющего вектора сессии
+        user_taste_vec = compute_user_taste_centroid(self.db, mood=active_mood)
+        target_direction_vec = (
+            update_session_drift_vector(user_taste_vec, curr_vec, action="complete")
+            if curr_vec else user_taste_vec
+        )
+
+        # 5. Двухэтапная генерация кандидатов (Nearest Neighbors HNSW + Serendipity Random)
+        nearest_candidates = find_nearest_tracks(
+            self.db,
+            target_vector=target_direction_vec,
+            limit=50,
+            mood=active_mood,
+            exclude_ids=recent_ids
+        )
+        random_candidates = mood_filtered_query.order_by(func.random()).limit(50).all()
+
+        candidate_map = {c.id: c for c in nearest_candidates}
+        for r_cand in random_candidates:
+            if r_cand.id not in candidate_map:
+                candidate_map[r_cand.id] = r_cand
+        candidates = list(candidate_map.values())
 
         # Если в выбранном настроении кандидаты закончились из-за кулдауна сессии,
         # сбрасываем recent_ids, но СТРОГО сохраняем целевой фильтр настроения!
@@ -158,15 +192,6 @@ class VibeEngine:
                 candidates = fb_query.order_by(func.random()).limit(100).all()
                 if not candidates:
                     return None
-
-        current_track = (
-            self.db.query(Track).filter(Track.id == current_track_id).first()
-            if current_track_id else None
-        )
-        curr_vec = (
-            deserialize_vector(current_track.embedding_json)
-            if current_track and current_track.embedding_json else None
-        )
 
         # Данные персонализации: лайки треков, любимые артисты и история
         candidate_ids = {c.id for c in candidates}
@@ -217,8 +242,13 @@ class VibeEngine:
         for cand in candidates:
             score = 1.0
 
-            # 1. Акустическое сходство (вектор 16D)
+            # 1. Соответствие центроиду вкуса пользователя (User Taste Centroid)
             cand_vec = deserialize_vector(cand.embedding_json)
+            if cand_vec and user_taste_vec:
+                taste_sim = cosine_similarity(user_taste_vec, cand_vec)
+                score += taste_sim * 2.0
+
+            # 2. Акустическое сходство с играющим треком (вектор 16D)
             if curr_vec and cand_vec:
                 sim = cosine_similarity(curr_vec, cand_vec)
                 score += sim * 2.5
@@ -230,9 +260,9 @@ class VibeEngine:
                 bpm_diff = abs(current_track.bpm - cand.bpm)
                 score -= min(1.0, bpm_diff / 50.0)
 
-            # 3. Персонализация: Буст любимых треков и артистов
+            # 4. Персонализация: Буст любимых треков и артистов
             if cand.id in liked_track_ids:
-                score += 3.5  # Максимальный приоритет конкретным лайкнутым трекам
+                score += 5.5  # Максимальный приоритет конкретным лайкнутым трекам
             elif cand.artist in liked_artists:
                 score += 1.0  # Умеренный приоритет другим трекам любимого артиста
 

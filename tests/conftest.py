@@ -13,6 +13,7 @@ if SERVER_DIR not in sys.path:
 from database.db import Base, get_db
 from database.models import User, SessionToken, Track
 from database.search_index import init_search_index
+from database.vector_index import init_vector_index
 from core.config import settings
 from core.security import hash_password, generate_session_token
 from main import app
@@ -96,6 +97,7 @@ def setup_test_database():
             conn.commit()
     Base.metadata.create_all(bind=test_engine)
     init_search_index(test_engine)
+    init_vector_index(test_engine)
     yield
     try:
         with test_engine.connect() as conn:

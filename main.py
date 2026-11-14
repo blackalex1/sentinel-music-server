@@ -22,12 +22,14 @@ from core.bootstrap import bootstrap_admin_user
 from plugin_system.manager import plugin_manager
 from streaming.watcher import music_watcher
 from database.search_index import init_search_index
+from database.vector_index import init_vector_index
 from api import api_router
 
 # Автоматическое создание схемы БД при старте
 try:
     Base.metadata.create_all(bind=engine)
     init_search_index(engine)
+    init_vector_index(engine)
 except Exception:
     pass
 

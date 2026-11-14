@@ -185,3 +185,128 @@ def cosine_similarity(v1: List[float], v2: List[float]) -> float:
 
     return dot / (norm_a * norm_b)
 
+
+def normalize_vector(v: List[float]) -> List[float]:
+    """Нормализует вектор признаков до единичной сферы (L2 норма)."""
+    if not v:
+        return []
+    norm = sum(x * x for x in v) ** 0.5
+    if norm == 0.0:
+        return [0.0] * len(v)
+    return [round(x / norm, 4) for x in v]
+
+
+def compute_user_taste_centroid(db, mood: Optional[str] = None) -> List[float]:
+    """
+    Вычисляет математический центроид вкуса пользователя (User Taste Centroid)
+    по всей коллекции треков с учетом лайков, истории прослушиваний и настроения.
+    """
+    import math
+    from database.models import Track, UserReaction, PlayHistory
+    from recommendations.mood import apply_mood_filter
+
+    liked_ids = {
+        r[0] for r in db.query(UserReaction.track_id).filter(UserReaction.is_liked == True).all()
+    }
+    disliked_ids = {
+        r[0] for r in db.query(UserReaction.track_id).filter(UserReaction.is_disliked == True).all()
+    }
+
+    # Статистика дослушиваний и скипов
+    play_rows = (
+        db.query(
+            PlayHistory.track_id,
+            PlayHistory.completed,
+            PlayHistory.skipped
+        )
+        .all()
+    )
+    completes: Dict[int, int] = {}
+    skips: Dict[int, int] = {}
+    for tid, is_comp, is_skip in play_rows:
+        if not tid:
+            continue
+        if is_comp:
+            completes[tid] = completes.get(tid, 0) + 1
+        if is_skip:
+            skips[tid] = skips.get(tid, 0) + 1
+
+    query = (
+        db.query(Track)
+        .filter(Track.is_discovery == False)
+        .filter(Track.embedding_json.isnot(None))
+    )
+    if mood and mood not in ("default", "all"):
+        query = apply_mood_filter(query, mood)
+
+    tracks = query.all()
+    if not tracks:
+        default_v = [0.667, 0.5, 0.5, 0.5] + [0.0] * 12
+        return normalize_vector(default_v)
+
+    accumulated = [0.0] * 16
+    total_weight = 0.0
+
+    for t in tracks:
+        if t.id in disliked_ids:
+            continue
+        vec = deserialize_vector(t.embedding_json)
+        if not vec or len(vec) != 16:
+            continue
+
+        w = 1.0
+        if t.id in liked_ids:
+            w += 3.5
+
+        c_cnt = completes.get(t.id, 0)
+        if c_cnt > 0:
+            w += math.log1p(c_cnt) * 1.2
+
+        s_cnt = skips.get(t.id, 0)
+        if s_cnt > 0:
+            w -= min(2.0, s_cnt * 1.4)
+
+        if w < 0.1:
+            w = 0.1
+
+        for i in range(16):
+            accumulated[i] += vec[i] * w
+        total_weight += w
+
+    if total_weight <= 0.0:
+        default_v = [0.667, 0.5, 0.5, 0.5] + [0.0] * 12
+        return normalize_vector(default_v)
+
+    mean_vec = [accumulated[i] / total_weight for i in range(16)]
+    return normalize_vector(mean_vec)
+
+
+def update_session_drift_vector(
+    current_session_vector: List[float],
+    track_vector: List[float],
+    action: str = "complete"
+) -> List[float]:
+    """
+    Вычисляет динамический дрейф сессионного вектора предпочтений в реальном времени.
+    - like: сильное притяжение к акустическому профилю трека (+0.8)
+    - complete: умеренное плавное смещение вектора (+0.35)
+    - skip: отталкивание от звучания пропущенного трека (-0.6)
+    """
+    if not current_session_vector or len(current_session_vector) != 16:
+        return track_vector if (track_vector and len(track_vector) == 16) else [0.0] * 16
+    if not track_vector or len(track_vector) != 16:
+        return current_session_vector
+
+    alpha = 0.35
+    if action == "like":
+        alpha = 0.80
+    elif action == "skip":
+        alpha = -0.60
+
+    drifted = [
+        c + alpha * t
+        for c, t in zip(current_session_vector, track_vector)
+    ]
+    return normalize_vector(drifted)
+
+

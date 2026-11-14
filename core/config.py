@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Автономный буфер Потока (Discovery Buffer)
     STREAM_BUFFER_SIZE: int = int(os.getenv("STREAM_BUFFER_SIZE", "10"))
 
+    # Внешний коллаборативный граф схожести треков
+    CROWD_GRAPH_API_KEY: str = os.getenv("CROWD_GRAPH_API_KEY", "")
+
     # Секретный ключ для криптографии, подписи и AES-256-GCM шифрования
     SECRET_KEY: str = os.getenv("SECRET_KEY", "sentinel-music-master-secret-key-32-bytes")
 

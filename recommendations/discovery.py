@@ -4,12 +4,13 @@ import requests
 import urllib.parse
 import threading
 import base64
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from database.models import Track, UserReaction, PlayHistory
 from recommendations.mood import apply_mood_filter
+from recommendations.collaborative import collab_graph_client
 
 
 class DiscoveryEngine:
@@ -136,99 +137,217 @@ class DiscoveryEngine:
 
         return seeds[:limit]
 
-    def _fetch_candidates_from_network(self, seed_artists: List[str], db: Session) -> List[Dict[str, Any]]:
-        """Запрашивает граф музыки и отбирает новые треки, отсутствующие в фонотеке."""
+    def get_seed_tracks(self, db: Session, limit: int = 5, mood: Optional[str] = None) -> List[Tuple[str, str]]:
+        """Определяет ключевые композиции вкусового профиля пользователя (артист, название)."""
+        seeds: List[Tuple[str, str]] = []
+        active_mood = mood if (mood and mood not in ("default", "all")) else None
+
+        # 1. Лайкнутые треки
+        liked_q = (
+            db.query(Track.artist, Track.title)
+            .join(UserReaction, UserReaction.track_id == Track.id)
+            .filter(UserReaction.is_liked == True)
+        )
+        if active_mood:
+            liked_q = apply_mood_filter(liked_q, active_mood)
+        liked_tracks = liked_q.limit(limit).all()
+        for a, t in liked_tracks:
+            if a and t:
+                seeds.append((a.strip(), t.strip()))
+
+        if len(seeds) >= limit:
+            return seeds[:limit]
+
+        # 2. Часто прослушиваемые треки
+        hist_q = (
+            db.query(Track.artist, Track.title)
+            .join(PlayHistory, PlayHistory.track_id == Track.id)
+            .filter(PlayHistory.completed == True)
+        )
+        if active_mood:
+            hist_q = apply_mood_filter(hist_q, active_mood)
+        hist_tracks = (
+            hist_q
+            .group_by(Track.artist, Track.title)
+            .order_by(func.count(PlayHistory.id).desc())
+            .limit(limit)
+            .all()
+        )
+        for a, t in hist_tracks:
+            if a and t:
+                pair = (a.strip(), t.strip())
+                if pair not in seeds:
+                    seeds.append(pair)
+                    if len(seeds) >= limit:
+                        break
+
+        return seeds[:limit]
+
+    def _fetch_candidates_from_network(
+        self,
+        seed_artists: List[str],
+        db: Session,
+        seed_tracks: Optional[List[Tuple[str, str]]] = None
+    ) -> List[Dict[str, Any]]:
+        """Запрашивает глобальный музыкальный граф и отбирает новые треки, отсутствующие в фонотеке."""
         new_candidates = []
-        headers = {"User-Agent": "SentinelMusic/1.0"}
-
+        headers = {"User-Agent": "SentinelMusic/2.0"}
         api_base = base64.b64decode("aHR0cHM6Ly9hcGkuZGVlemVyLmNvbQ==").decode("utf-8")
+        seen_keys = set()
 
-        for seed in seed_artists:
+        # 1. Сначала опрашиваем коллаборативный граф ассоциаций треков (высокая точность)
+        active_seed_tracks = seed_tracks if seed_tracks is not None else self.get_seed_tracks(db, limit=4)
+        for seed_art, seed_tit in active_seed_tracks:
             try:
-                # 1. Поиск ID исполнителя
-                q = urllib.parse.quote(seed)
-                url = f"{api_base}/search/artist?q={q}"
-                resp = requests.get(url, headers=headers, timeout=4)
-                if resp.status_code != 200:
-                    continue
-                data = resp.json()
-                
-                artists = data.get("data", [])
-                if not artists:
-                    continue
-
-                # Выбираем наиболее релевантного артиста (по фанатам / точному совпадению имени)
-                exact_matches = [a for a in artists if a.get("name", "").strip().lower() == seed.strip().lower()]
-                if exact_matches:
-                    chosen = max(exact_matches, key=lambda a: a.get("nb_fan", 0))
-                else:
-                    chosen = max(artists, key=lambda a: a.get("nb_fan", 0))
-
-                artist_id = chosen["id"]
-                seed_name = chosen["name"]
-
-                # 2. Получение связанных исполнителей
-                rel_url = f"{api_base}/artist/{artist_id}/related"
-                resp_rel = requests.get(rel_url, headers=headers, timeout=4)
-                if resp_rel.status_code != 200:
-                    continue
-                rel_data = resp_rel.json()
-
-                related_artists = rel_data.get("data", [])[:4]
-                # Включаем самого исполнителя (для неизвестных хитов) и связанных исполнителей
-                target_artists = [{"id": artist_id, "name": seed_name}] + related_artists
-
-                # 3. Топ-хиты найденных артистов
-                for rel in target_artists:
-                    rel_id = rel.get("id")
-                    rel_name = rel.get("name")
-                    if not rel_id or not rel_name:
+                similars = collab_graph_client.get_similar_tracks(seed_art, seed_tit, limit=6)
+                for item in similars:
+                    c_art = item.get("artist", "").strip()
+                    c_tit = item.get("title", "").strip()
+                    c_match = float(item.get("match", 0.5))
+                    if not c_art or not c_tit:
                         continue
 
-                    top_url = f"{api_base}/artist/{rel_id}/top?limit=5"
-                    resp_top = requests.get(top_url, headers=headers, timeout=4)
-                    if resp_top.status_code != 200:
+                    key = f"{c_art.lower()} - {c_tit.lower()}"
+                    if key in seen_keys:
                         continue
-                    top_data = resp_top.json()
 
-                    for item in top_data.get("data", []):
-                        track_title = item.get("title", "").strip()
-                        preview_url = item.get("preview")
-                        if not track_title or not preview_url:
+                    existing = (
+                        db.query(Track.id)
+                        .filter(
+                            Track.artist.ilike(f"%{c_art}%"),
+                            Track.title.ilike(f"%{c_tit}%")
+                        )
+                        .first()
+                    )
+                    if existing:
+                        continue
+
+                    seen_keys.add(key)
+                    preview_url = None
+                    cover_url = None
+                    album_title = "Discovery Single"
+                    duration = 30.0
+
+                    try:
+                        q_str = urllib.parse.quote(f"{c_art} {c_tit}")
+                        s_resp = requests.get(f"{api_base}/search?q={q_str}&limit=1", headers=headers, timeout=3.0)
+                        if s_resp.status_code == 200:
+                            s_data = s_resp.json().get("data", [])
+                            if s_data:
+                                top_match = s_data[0]
+                                preview_url = top_match.get("preview")
+                                cover_url = top_match.get("album", {}).get("cover_medium") or top_match.get("album", {}).get("cover_big")
+                                album_title = top_match.get("album", {}).get("title") or album_title
+                                duration = float(top_match.get("duration", 30.0))
+                    except Exception:
+                        pass
+
+                    reason = f"Ассоциация с «{seed_tit}» (схожесть {int(c_match * 100)}%)"
+                    candidate = {
+                        "id": -(1000 + len(new_candidates) + 1),
+                        "title": c_tit,
+                        "artist": c_art,
+                        "album": album_title,
+                        "duration": duration,
+                        "audio_format": "mp3",
+                        "file_path": preview_url,
+                        "preview_url": preview_url,
+                        "cover_url": cover_url,
+                        "is_discovery": True,
+                        "is_preview": True,
+                        "discovery_reason": reason,
+                        "collab_match": c_match
+                    }
+                    new_candidates.append(candidate)
+                    if len(new_candidates) >= 12:
+                        break
+            except Exception:
+                continue
+
+        # 2. Если кандидатов из коллаборативного графа пока мало — дополняем графом связанных артистов
+        if len(new_candidates) < 8:
+            for seed in seed_artists:
+                try:
+                    q = urllib.parse.quote(seed)
+                    url = f"{api_base}/search/artist?q={q}"
+                    resp = requests.get(url, headers=headers, timeout=4)
+                    if resp.status_code != 200:
+                        continue
+                    data = resp.json()
+                    artists = data.get("data", [])
+                    if not artists:
+                        continue
+
+                    exact_matches = [a for a in artists if a.get("name", "").strip().lower() == seed.strip().lower()]
+                    chosen = max(exact_matches, key=lambda a: a.get("nb_fan", 0)) if exact_matches else max(artists, key=lambda a: a.get("nb_fan", 0))
+
+                    artist_id = chosen["id"]
+                    seed_name = chosen["name"]
+
+                    rel_url = f"{api_base}/artist/{artist_id}/related"
+                    resp_rel = requests.get(rel_url, headers=headers, timeout=4)
+                    if resp_rel.status_code != 200:
+                        continue
+                    rel_data = resp_rel.json()
+
+                    related_artists = rel_data.get("data", [])[:4]
+                    target_artists = [{"id": artist_id, "name": seed_name}] + related_artists
+
+                    for rel in target_artists:
+                        rel_id = rel.get("id")
+                        rel_name = rel.get("name")
+                        if not rel_id or not rel_name:
                             continue
 
-                        # 4. Проверяем наличие трека в локальной фонотеке
-                        existing = (
-                            db.query(Track.id)
-                            .filter(
-                                Track.artist.ilike(f"%{rel_name}%"),
-                                Track.title.ilike(f"%{track_title}%")
+                        top_url = f"{api_base}/artist/{rel_id}/top?limit=5"
+                        resp_top = requests.get(top_url, headers=headers, timeout=4)
+                        if resp_top.status_code != 200:
+                            continue
+                        top_data = resp_top.json()
+
+                        for item in top_data.get("data", []):
+                            track_title = item.get("title", "").strip()
+                            preview_url = item.get("preview")
+                            if not track_title or not preview_url:
+                                continue
+
+                            key = f"{rel_name.lower()} - {track_title.lower()}"
+                            if key in seen_keys:
+                                continue
+
+                            existing = (
+                                db.query(Track.id)
+                                .filter(
+                                    Track.artist.ilike(f"%{rel_name}%"),
+                                    Track.title.ilike(f"%{track_title}%")
+                                )
+                                .first()
                             )
-                            .first()
-                        )
-                        if existing:
-                            continue  # Уже есть у пользователя в фонотеке
+                            if existing:
+                                continue
 
-                        reason = f"Похоже на {seed_name}" if rel_name != seed_name else f"Открытие от {seed_name}"
-                        candidate = {
-                            "id": -(1000 + len(new_candidates) + 1),  # Отрицательный виртуальный ID
-                            "title": track_title,
-                            "artist": rel_name,
-                            "album": item.get("album", {}).get("title", "Discovery Single"),
-                            "duration": float(item.get("duration", 30.0)),
-                            "audio_format": "mp3",
-                            "file_path": preview_url,
-                            "preview_url": preview_url,
-                            "cover_url": item.get("album", {}).get("cover_medium") or item.get("album", {}).get("cover_big"),
-                            "is_discovery": True,
-                            "is_preview": True,
-                            "discovery_reason": reason
-                        }
-                        new_candidates.append(candidate)
-
-            except Exception as e:
-                # Тихо переходим к следующему сид-артисту при сетевой ошибке
-                continue
+                            seen_keys.add(key)
+                            reason = f"Похоже на {seed_name}" if rel_name != seed_name else f"Открытие от {seed_name}"
+                            candidate = {
+                                "id": -(1000 + len(new_candidates) + 1),
+                                "title": track_title,
+                                "artist": rel_name,
+                                "album": item.get("album", {}).get("title", "Discovery Single"),
+                                "duration": float(item.get("duration", 30.0)),
+                                "audio_format": "mp3",
+                                "file_path": preview_url,
+                                "preview_url": preview_url,
+                                "cover_url": item.get("album", {}).get("cover_medium") or item.get("album", {}).get("cover_big"),
+                                "is_discovery": True,
+                                "is_preview": True,
+                                "discovery_reason": reason,
+                                "collab_match": 0.5
+                            }
+                            new_candidates.append(candidate)
+                            if len(new_candidates) >= 20:
+                                break
+                except Exception:
+                    continue
 
         return new_candidates
 
@@ -244,7 +363,11 @@ class DiscoveryEngine:
                 db = db_factory()
                 try:
                     seeds = self.get_seed_artists(db)
-                    candidates = self._fetch_candidates_from_network(seeds, db)
+                    seed_tracks = self.get_seed_tracks(db, limit=4)
+                    try:
+                        candidates = self._fetch_candidates_from_network(seeds, db, seed_tracks=seed_tracks)
+                    except TypeError:
+                        candidates = self._fetch_candidates_from_network(seeds, db)
                     with self._lock:
                         if candidates:
                             self._cache_candidates = candidates
@@ -270,7 +393,7 @@ class DiscoveryEngine:
     ) -> Optional[Dict[str, Any]]:
         """
         Возвращает один трек-открытие:
-        1. Сначала отдает треки-кандидаты из внешнего музыкального графа (Deezer Preview / Stream).
+        1. Сначала отдает треки-кандидаты из внешнего музыкального графа и коллаборативного пула.
         2. При only_network=True гарантирует, что трек НИКОГДА не будет взят из локальной фонотеки.
         3. Если only_network=False и сеть недоступна, может вернуть непрослушанный трек из фонотеки.
         """
@@ -287,7 +410,11 @@ class DiscoveryEngine:
             # Если кэш пуст — пытаемся получить кандидатов из сети прямо сейчас
             if not self._cache_candidates:
                 seeds = self.get_seed_artists(db, mood=mood)
-                self._cache_candidates = self._fetch_candidates_from_network(seeds, db)
+                seed_tracks = self.get_seed_tracks(db, limit=4, mood=mood)
+                try:
+                    self._cache_candidates = self._fetch_candidates_from_network(seeds, db, seed_tracks=seed_tracks)
+                except TypeError:
+                    self._cache_candidates = self._fetch_candidates_from_network(seeds, db)
                 self._last_refresh_ts = now
             elif now - self._last_refresh_ts > self._cache_ttl and session_factory:
                 self.refresh_cache_in_background(session_factory)

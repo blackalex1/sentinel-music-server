@@ -209,7 +209,7 @@ def test_library_analyzer_worker_progress(db_session):
 
 
 def test_stream_capability_and_preview_fallback(client, auth_headers, db_session, monkeypatch):
-    """Проверяет эндпоинт /api/stream/capability и отдачу 30с Deezer демо при отсутствии плагинов скачивания."""
+    """Проверяет эндпоинт /api/stream/capability и отдачу 30с демо при отсутствии плагинов скачивания."""
     from plugin_system.manager import plugin_manager
     from recommendations.discovery import discovery_engine
 
@@ -224,15 +224,15 @@ def test_stream_capability_and_preview_fallback(client, auth_headers, db_session
     # 2. Мокаем отсутствие плагинов скачивания
     monkeypatch.setattr(plugin_manager, "has_ingestion_plugins", lambda: False)
 
-    # Заполняем кэш кандидатов Deezer с отрицательными ID
+    # Заполняем кэш сетевых кандидатов с отрицательными ID
     discovery_engine._cache_candidates = [
         {
             "id": -1001,
-            "title": "Deezer Demo Track",
-            "artist": "Deezer Artist",
+            "title": "Network Demo Track",
+            "artist": "Demo Artist",
             "duration": 30.0,
-            "preview_url": "https://cdns-preview.deezer.com/stream.mp3",
-            "file_path": "https://cdns-preview.deezer.com/stream.mp3",
+            "preview_url": "https://cdns-preview.stream/track.mp3",
+            "file_path": "https://cdns-preview.stream/track.mp3",
             "is_discovery": True,
             "discovery_reason": "Top Hits"
         }
@@ -243,7 +243,7 @@ def test_stream_capability_and_preview_fallback(client, auth_headers, db_session
     assert cand["id"] == -1001
     assert cand["is_preview"] is True
     assert "30с демо" in cand["discovery_reason"]
-    assert cand["preview_url"] == "https://cdns-preview.deezer.com/stream.mp3"
+    assert cand["preview_url"] == "https://cdns-preview.stream/track.mp3"
 
 
 def test_vibe_engine_100_percent_discovery_never_returns_local_tracks(db_session, monkeypatch):
@@ -464,3 +464,113 @@ def test_vibe_engine_dayparting_night_vs_morning(db_session):
         for _ in range(15)
     ]
     assert night_picks.count(t_calm.id) > night_picks.count(t_energetic.id)
+
+
+def test_user_taste_centroid_computation(db_session):
+    """Проверяет вычисление математического центроида вкуса пользователя (User Taste Centroid)."""
+    from recommendations.embeddings import compute_user_taste_centroid, serialize_vector, cosine_similarity
+    from database.models import UserReaction
+
+    # Создаем 2 трека с разными акустическими векторами
+    # v1: темп 140, высокая энергия
+    v1 = [1.0, 0.9, 0.8, 0.7] + [0.1] * 12
+    # v2: темп 80, низкая энергия
+    v2 = [0.2, 0.2, 0.3, 0.4] + [0.0] * 12
+
+    t1 = Track(title="Heavy Rock", artist="Rocker", duration=210, audio_format="flac", file_path="t1_rock.flac", embedding_json=serialize_vector(v1), bpm=140.0, energy=0.9)
+    t2 = Track(title="Lofi Beat", artist="Beater", duration=160, audio_format="flac", file_path="t2_lofi.flac", embedding_json=serialize_vector(v2), bpm=80.0, energy=0.2)
+    db_session.add_all([t1, t2])
+    db_session.commit()
+
+    # Ставим лайк треку t1
+    db_session.add(UserReaction(track_id=t1.id, is_liked=True))
+    db_session.commit()
+
+    centroid = compute_user_taste_centroid(db_session)
+    assert len(centroid) == 16
+
+    # Длина вектора L2 должна быть близка к 1.0 (нормализация)
+    norm = sum(x * x for x in centroid) ** 0.5
+    assert abs(norm - 1.0) < 0.01
+
+    # Из-за лайка центроид должен быть значительно ближе к v1, чем к v2
+    sim_v1 = cosine_similarity(centroid, v1)
+    sim_v2 = cosine_similarity(centroid, v2)
+    assert sim_v1 > sim_v2
+
+
+def test_dynamic_session_drift_updates():
+    """Проверяет дрейф сессионного вектора предпочтений при лайке, дослушивании и скипе."""
+    from recommendations.embeddings import update_session_drift_vector, cosine_similarity
+
+    # Ортогональные векторы: начальное сходство = 0.0
+    base_session = [1.0 if i < 8 else 0.0 for i in range(16)]
+    track_v = [0.0 if i < 8 else 1.0 for i in range(16)]
+    assert cosine_similarity(base_session, track_v) == 0.0
+
+    # Лайк трека должен приблизить сессионный вектор к треку
+    liked_session = update_session_drift_vector(base_session, track_v, action="like")
+    assert cosine_similarity(liked_session, track_v) > cosine_similarity(base_session, track_v)
+
+    # Скип трека должен оттолкнуть сессионный вектор
+    skip_track = [1.0 if i < 4 else 0.0 for i in range(16)]
+    skipped_session = update_session_drift_vector(base_session, skip_track, action="skip")
+    assert cosine_similarity(skipped_session, skip_track) < cosine_similarity(base_session, skip_track)
+
+
+def test_collaborative_graph_client_parsing_and_fallback(monkeypatch):
+    """Проверяет парсинг коллаборативного графа ассоциаций и работу прерывателя цепи."""
+    from recommendations.collaborative import CollaborativeGraphClient
+
+    client = CollaborativeGraphClient(api_key="test_key")
+
+    class MockResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "similartracks": {
+                    "track": [
+                        {
+                            "name": "Breathe",
+                            "artist": {"name": "The Prodigy"},
+                            "match": "0.95"
+                        },
+                        {
+                            "name": "Block Rockin' Beats",
+                            "artist": {"name": "The Chemical Brothers"},
+                            "match": "0.82"
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: MockResponse())
+
+    similars = client.get_similar_tracks("The Prodigy", "Firestarter", limit=5)
+    assert len(similars) == 2
+    assert similars[0]["title"] == "Breathe"
+    assert similars[0]["artist"] == "The Prodigy"
+    assert similars[0]["match"] == 0.95
+    assert similars[1]["artist"] == "The Chemical Brothers"
+
+
+def test_vector_index_nearest_tracks_search(db_session):
+    """Проверяет работу векторного поиска ближайших треков (Nearest Neighbors)."""
+    from database.vector_index import find_nearest_tracks
+    from recommendations.embeddings import serialize_vector
+
+    target = [1.0, 0.9, 0.8, 0.7] + [0.0] * 12
+    close_v = [0.95, 0.88, 0.75, 0.68] + [0.0] * 12
+    far_v = [0.1, 0.05, 0.1, 0.0] + [0.0] * 12
+
+    t_close = Track(title="Near Song", artist="Acoustic Twin", duration=180, audio_format="flac", file_path="near.flac", embedding_json=serialize_vector(close_v))
+    t_far = Track(title="Distant Song", artist="Stranger", duration=240, audio_format="flac", file_path="far.flac", embedding_json=serialize_vector(far_v))
+    db_session.add_all([t_close, t_far])
+    db_session.commit()
+
+    nearest = find_nearest_tracks(db_session, target_vector=target, limit=2)
+    assert len(nearest) >= 1
+    # Первый ближайший должен быть именно t_close
+    assert nearest[0].id == t_close.id
+
