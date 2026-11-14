@@ -1,10 +1,11 @@
 import os
 from typing import Optional, List
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from database.db import get_db, SessionLocal
-from database.models import User, UserReaction, Track
+from database.models import User, UserReaction, Track, PlayHistory
 from recommendations.vibe_engine import VibeEngine
 from recommendations.analyzer import library_analyzer
 from recommendations.discovery import discovery_engine
@@ -12,6 +13,13 @@ from plugin_system.manager import plugin_manager
 from core.security import get_current_user, get_current_admin_user
 
 router = APIRouter(tags=["Поток и Реакции"])
+
+
+class PlaybackEventRequest(BaseModel):
+    track_id: int
+    listened_duration: float = 0.0
+    completed: bool = False
+    skipped: bool = False
 
 
 @router.get("/stream/next")
@@ -23,12 +31,15 @@ def get_next_stream_track(
     discovery_ratio: float = Query(0.2, ge=0.0, le=1.0, description="Частота новых треков: 0.0 - 1.0"),
     consecutive_artist: Optional[str] = Query(None, description="Имя артиста текущего трека"),
     consecutive_count: int = Query(0, ge=0, description="Сколько раз подряд играл этот артист"),
+    skipped_artists: Optional[str] = Query(None, description="Список артистов с недавними скипами через запятую"),
+    tz_offset_minutes: int = Query(0, description="Смещение часового пояса клиента в минутах"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Возвращает следующий трек для бесконечного умного потока «Поток».
-    Поддерживает ранжирование по настроению, темпу, исключение повторов и управляемую частоту открытий.
+    Поддерживает ранжирование по настроению, времени суток (Dayparting), темпу,
+    исключение повторов, штрафы за пропуск (Skip Penalty) и управляемую частоту открытий.
     """
     parsed_recent_ids: List[int] = []
     if recent_ids:
@@ -36,6 +47,10 @@ def get_next_stream_track(
             parsed_recent_ids = [int(i.strip()) for i in recent_ids.split(",") if i.strip().isdigit()]
         except Exception:
             parsed_recent_ids = []
+
+    parsed_skipped_artists: List[str] = []
+    if skipped_artists:
+        parsed_skipped_artists = [a.strip() for a in skipped_artists.split(",") if a.strip()]
 
     engine = VibeEngine(db, session_factory=SessionLocal)
     next_track = engine.get_next_vibe_track(
@@ -45,7 +60,9 @@ def get_next_stream_track(
         mood_energy=mood_energy,
         discovery_ratio=discovery_ratio,
         consecutive_artist=consecutive_artist,
-        consecutive_count=consecutive_count
+        consecutive_count=consecutive_count,
+        skipped_artists=parsed_skipped_artists,
+        tz_offset_minutes=tz_offset_minutes
     )
 
     if not next_track:
@@ -54,6 +71,33 @@ def get_next_stream_track(
         raise HTTPException(status_code=404, detail="Нет доступных треков для Потока")
 
     return next_track
+
+
+@router.post("/stream/playback-event")
+def log_playback_event(
+    payload: PlaybackEventRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Фиксирует событие воспроизведения (дослушивание, скип, прогресс) для аналитики и рекомендаций."""
+    track = db.query(Track).filter(Track.id == payload.track_id).first()
+    if not track:
+        raise HTTPException(status_code=404, detail="Трек не найден")
+
+    ph = PlayHistory(
+        track_id=payload.track_id,
+        listened_duration=max(0.0, float(payload.listened_duration)),
+        completed=bool(payload.completed),
+        skipped=bool(payload.skipped)
+    )
+    db.add(ph)
+    db.commit()
+    return {
+        "status": "recorded",
+        "track_id": payload.track_id,
+        "completed": ph.completed,
+        "skipped": ph.skipped
+    }
 
 
 @router.get("/stream/analytics/status")
@@ -67,11 +111,12 @@ def get_analytics_status(
 
 @router.post("/stream/analytics/start")
 def start_analytics(
+    max_workers: Optional[int] = None,
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     """Запускает фоновый расчет характеристик (BPM, Energy, Valence) для всех неразмеченных треков (требуются права администратора)."""
-    started = library_analyzer.start_analysis()
+    started = library_analyzer.start_analysis(max_workers=max_workers)
     return {
         "status": "ok" if started else "already_running",
         "details": library_analyzer.get_status(db)

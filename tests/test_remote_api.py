@@ -267,3 +267,80 @@ def test_remote_websocket_auth_rejection(client):
             ws.receive_json()
         assert exc.value.code == 1008
 
+
+def test_remote_party_mode_lifecycle_and_sync(client, auth_user_and_token):
+    """Тестирует создание, присоединение, широковещательную синхронизацию таймкода и выход из Party Mode."""
+    user, token = auth_user_and_token
+    auth_headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Проверяем статус когда пати еще нет
+    res = client.get("/api/remote/party", headers=auth_headers)
+    assert res.status_code == 200
+    assert res.json()["active"] is False
+
+    dev_host_id = "party_host_pc"
+    dev_guest_id = "party_guest_phone"
+
+    with client.websocket_connect(
+        f"/api/remote/ws?token={token}&device_id={dev_host_id}&device_name=HostPC&device_type=player"
+    ) as ws_host:
+        ws_host.receive_json()  # welcome
+
+        with client.websocket_connect(
+            f"/api/remote/ws?token={token}&device_id={dev_guest_id}&device_name=GuestPhone&device_type=player"
+        ) as ws_guest:
+            ws_guest.receive_json()  # welcome
+            ws_host.receive_json()   # devices_update
+
+            # Хост создает Party Mode
+            ws_host.send_json({
+                "action": "party_create",
+                "name": "Friday Vibe Session"
+            })
+            party_created = ws_host.receive_json()
+            assert party_created["type"] == "party_created"
+            assert party_created["party"]["host_device_id"] == dev_host_id
+            assert "anchor_server_time" in party_created["party"]
+
+            # Гость получает party_update о создании комнаты
+            update_on_guest = ws_guest.receive_json()
+            assert update_on_guest["type"] == "party_update"
+
+            # Гость присоединяется к сессии
+            ws_guest.send_json({
+                "action": "party_join"
+            })
+            guest_joined = ws_guest.receive_json()
+            assert guest_joined["type"] == "party_joined"
+            assert guest_joined["party"]["host_device_id"] == dev_host_id
+
+            # Хост начинает воспроизведение трека
+            ws_host.send_json({
+                "action": "state_update",
+                "state": {
+                    "is_playing": True,
+                    "position_ms": 45000,
+                    "current_track": {"id": 99, "title": "Sync Anthem", "artist": "Master"}
+                }
+            })
+
+            # Гость получает party_sync с точным таймкодом и состоянием воспроизведения,
+            # а также стандартный device_state Sentinel Connect
+            msgs = [ws_guest.receive_json(), ws_guest.receive_json()]
+            sync_event = next(m for m in msgs if m["type"] == "party_sync")
+            assert sync_event["party"]["is_playing"] is True
+            assert sync_event["party"]["anchor_position_ms"] == 45000
+            assert sync_event["party"]["current_track"]["title"] == "Sync Anthem"
+            assert sync_event["party"]["anchor_server_time"] > 0
+
+            # Проверяем REST API отображения Party Mode
+            rest_status = client.get("/api/remote/party", headers=auth_headers).json()
+            assert rest_status["active"] is True
+            assert len(rest_status["party"]["members"]) == 2
+
+            # Хост закрывает пати
+            ws_host.send_json({"action": "party_leave"})
+            ws_host.receive_json()  # party_left
+            guest_closed = ws_guest.receive_json()
+            assert guest_closed["type"] == "party_closed"
+

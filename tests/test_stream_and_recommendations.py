@@ -328,8 +328,8 @@ def test_vibe_engine_personalization_boosts_liked_track(db_session):
     db_session.commit()
 
     engine = VibeEngine(db_session)
-    # Запускаем выборку несколько раз для статистической надежности
-    results = [engine.get_next_vibe_track(discovery_ratio=0.0).id for _ in range(10)]
+    # Запускаем выборку для статистической надежности
+    results = [engine.get_next_vibe_track(discovery_ratio=0.0).id for _ in range(25)]
     assert t1.id in results
     assert results.count(t1.id) > results.count(t2.id)
 
@@ -355,3 +355,112 @@ def test_seed_artists_filter_by_mood(db_session):
 
     seeds_energy = discovery_engine.get_seed_artists(db_session, limit=2, mood="energy")
     assert "Energy Rocker" in seeds_energy
+
+
+def test_parallel_library_analyzer(db_session, monkeypatch):
+    """Проверяет параллельный анализ фонотеки пулом воркеров и детальный статус."""
+    from recommendations.analyzer import LibraryAnalyzer
+    import time
+
+    tracks = [
+        Track(title=f"Song {i}", artist="Artist", duration=180, audio_format="mp3", file_path=f"fake_{i}.mp3")
+        for i in range(8)
+    ]
+    db_session.add_all(tracks)
+    db_session.commit()
+
+    # Мокаем извлечение характеристик, чтобы не вызывать реальный ffmpeg
+    def mock_extract(path, **kwargs):
+        return {"bpm": 128.0, "energy": 0.8, "valence": 0.6, "danceability": 0.7, "vector": [0.5]*16}
+
+    def mock_loudness(path, **kwargs):
+        return {"loudness_lufs": -9.0, "gain_db": 0.0, "peak_db": -1.0}
+
+    monkeypatch.setattr("recommendations.analyzer.extract_audio_features", mock_extract)
+    monkeypatch.setattr("recommendations.analyzer.measure_track_loudness", mock_loudness)
+    monkeypatch.setattr("os.path.exists", lambda p: True)
+
+    # Используем правильную потокобезопасную фабрику сессий SessionLocal
+    from database.db import SessionLocal
+    analyzer = LibraryAnalyzer(session_factory=SessionLocal)
+    assert analyzer.start_analysis(batch_size=8, max_workers=3) is True
+
+    # Ждем завершения анализа
+    for _ in range(50):
+        if not analyzer.is_running:
+            break
+        time.sleep(0.05)
+
+    status = analyzer.get_status(db_session)
+    assert status["is_running"] is False
+    assert status["total_tracks"] >= 8
+    assert status["analyzed_tracks"] >= 8
+    assert "active_workers" in status
+    assert "current_tracks" in status
+
+    # Проверяем, что в БД у всех треков проставились BPM и Loudness
+    for t in tracks:
+        db_session.refresh(t)
+        assert t.bpm == 128.0
+        assert t.loudness_lufs == -9.0
+
+
+def test_vibe_engine_skip_penalty_and_playback_event(client, auth_headers, db_session):
+    """Проверяет эндпоинт событий воспроизведения и штраф за пропуск трека в Потоке."""
+    from database.models import PlayHistory
+    from recommendations.vibe_engine import VibeEngine
+
+    t_good = Track(title="Keep Listening", artist="Good Artist", duration=180, audio_format="mp3", file_path="g.mp3", bpm=120.0, energy=0.7)
+    t_skip = Track(title="Skip Me Fast", artist="Skipped Artist", duration=180, audio_format="mp3", file_path="s.mp3", bpm=120.0, energy=0.7)
+    db_session.add_all([t_good, t_skip])
+    db_session.commit()
+
+    # 1. Отправляем событие раннего пропуска для t_skip через API
+    event_res = client.post("/api/stream/playback-event", headers=auth_headers, json={
+        "track_id": t_skip.id,
+        "listened_duration": 5.2,
+        "completed": False,
+        "skipped": True
+    })
+    assert event_res.status_code == 200
+    assert event_res.json()["skipped"] is True
+
+    # 2. Добавляем еще один скип для накопления штрафа
+    client.post("/api/stream/playback-event", headers=auth_headers, json={
+        "track_id": t_skip.id,
+        "listened_duration": 8.0,
+        "completed": False,
+        "skipped": True
+    })
+
+    # 3. Запрашиваем трек у VibeEngine
+    engine = VibeEngine(db_session)
+    picks = [engine.get_next_vibe_track(discovery_ratio=0.0).id for _ in range(10)]
+
+    # Трек t_good с нулевым числом скипов должен выбираться намного чаще, чем t_skip со штрафом
+    assert picks.count(t_good.id) > picks.count(t_skip.id)
+
+
+def test_vibe_engine_dayparting_night_vs_morning(db_session):
+    """Проверяет адаптацию потока под время суток (Dayparting)."""
+    from recommendations.vibe_engine import VibeEngine
+
+    # t_calm: тихий, низкоэнергичный (идеален для ночи)
+    t_calm = Track(title="Night Ambient", artist="Chill Guy", duration=200, audio_format="flac", file_path="calm.flac", bpm=85.0, energy=0.25, loudness_lufs=-14.0)
+    # t_energetic: громкий, клубный (подходит для утра/дня)
+    t_energetic = Track(title="Morning Booster", artist="Club Master", duration=180, audio_format="mp3", file_path="booster.mp3", bpm=130.0, energy=0.88, loudness_lufs=-6.0)
+    db_session.add_all([t_calm, t_energetic])
+    db_session.commit()
+
+    engine = VibeEngine(db_session)
+
+    # Имитируем ночь: смещение часового пояса так, чтобы получилось 02:00
+    # Вычисляем смещение от текущего часа UTC
+    import datetime
+    cur_utc_hour = datetime.datetime.now(datetime.timezone.utc).hour
+    night_offset = (2 - cur_utc_hour) * 60
+    night_picks = [
+        engine.get_next_vibe_track(discovery_ratio=0.0, tz_offset_minutes=night_offset).id
+        for _ in range(15)
+    ]
+    assert night_picks.count(t_calm.id) > night_picks.count(t_energetic.id)

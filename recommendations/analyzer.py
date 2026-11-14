@@ -1,7 +1,8 @@
 import os
 import time
 import threading
-from typing import Dict, Any, Optional, Set
+import concurrent.futures
+from typing import Dict, Any, Optional, Set, List
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, and_, not_, case
 
@@ -16,8 +17,8 @@ class LibraryAnalyzer:
     """
     Фоновый воркер для психоакустического анализа фонотеки:
     - Извлекает BPM, Energy, Valence, Danceability для всех треков
-    - Выполняет анализ пакетами с минимальной нагрузкой на CPU (Zero Audio Stutter)
-    - Ведет учет статистики и распределения по настроениям
+    - Выполняет параллельный анализ с контролем пула воркеров (Zero Audio Stutter)
+    - Ведет учет статистики, прогресса и распределения по настроениям
     """
 
     def __init__(self, session_factory=SessionLocal):
@@ -26,7 +27,9 @@ class LibraryAnalyzer:
         self._stop_event = threading.Event()
         self._lock = threading.RLock()
         self._failed_track_ids: Set[int] = set()
+        self._active_jobs: Dict[int, str] = {}
 
+        self.max_workers = min(4, max(1, (os.cpu_count() or 2) - 1))
         self.is_running = False
         self.total_tracks = 0
         self.analyzed_count = 0
@@ -35,7 +38,7 @@ class LibraryAnalyzer:
         self.last_started_at: Optional[float] = None
         self.last_completed_at: Optional[float] = None
 
-    def start_analysis(self, batch_size: int = 25) -> bool:
+    def start_analysis(self, batch_size: int = 25, max_workers: Optional[int] = None) -> bool:
         """Запускает фоновый анализ треков, у которых еще не рассчитаны характеристики."""
         with self._lock:
             if self.is_running:
@@ -43,6 +46,11 @@ class LibraryAnalyzer:
             self.is_running = True
             self._stop_event.clear()
             self._failed_track_ids.clear()
+            self._active_jobs.clear()
+            if max_workers is not None and max_workers > 0:
+                self.max_workers = max_workers
+            else:
+                self.max_workers = min(4, max(1, (os.cpu_count() or 2) - 1))
             self.last_started_at = time.time()
 
         self._thread = threading.Thread(
@@ -52,7 +60,7 @@ class LibraryAnalyzer:
             daemon=True
         )
         self._thread.start()
-        print("[Analyzer] Фоновый анализ фонотеки запущен...")
+        print(f"[Analyzer] Фоновый анализ фонотеки запущен (воркеров: {self.max_workers})...")
         return True
 
     def stop_analysis(self):
@@ -60,6 +68,7 @@ class LibraryAnalyzer:
         self._stop_event.set()
         with self._lock:
             self.is_running = False
+            self._active_jobs.clear()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=3.0)
             self._thread = None
@@ -113,25 +122,32 @@ class LibraryAnalyzer:
 
     def _process_single_track(self, track_id: int):
         """Обрабатывает один трек с немедленной фиксацией в БД (Real-time Progress & Crash Resilience)."""
+        if self._stop_event.is_set():
+            return
+
         db: Session = self.session_factory()
         try:
             track = db.query(Track).filter(Track.id == track_id).first()
             if not track:
                 return
 
+            label = f"{track.artist} - {track.title}"
             with self._lock:
-                self.current_track = f"{track.artist} - {track.title}"
+                self._active_jobs[track_id] = label
+                self.current_track = label
 
             self._apply_audio_features(track)
             db.commit()
 
             with self._lock:
                 self.analyzed_count += 1
+                self._active_jobs.pop(track_id, None)
         except Exception as e:
             db.rollback()
             with self._lock:
                 self.errors_count += 1
                 self._failed_track_ids.add(track_id)
+                self._active_jobs.pop(track_id, None)
             print(f"[Analyzer Error]: Не удалось зафиксировать трек #{track_id}: {e}")
         finally:
             db.close()
@@ -158,20 +174,30 @@ class LibraryAnalyzer:
                         self.is_running = False
                         self.last_completed_at = time.time()
                         self.current_track = None
+                        self._active_jobs.clear()
                     print("[Analyzer] Все треки в фонотеке успешно проанализированы!")
                     break
 
-                for track_id in track_ids:
-                    if self._stop_event.is_set():
-                        break
+                # Параллельная обработка пакета треков
+                with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    futures = {executor.submit(self._process_single_track, tid): tid for tid in track_ids}
+                    for future in concurrent.futures.as_completed(futures):
+                        if self._stop_event.is_set():
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            break
+                        try:
+                            future.result()
+                        except Exception as fe:
+                            tid = futures[future]
+                            print(f"[Analyzer Error]: Непредвиденная ошибка воркера для трека #{tid}: {fe}")
 
-                    self._process_single_track(track_id)
-                    time.sleep(0.01)
+                time.sleep(0.01)
 
         finally:
             with self._lock:
                 self.is_running = False
                 self.current_track = None
+                self._active_jobs.clear()
 
     def analyze_single_track(self, track_id: int, db: Session) -> Optional[Track]:
         """Анализирует один трек и сохраняет характеристики и громкость в БД."""
@@ -240,7 +266,9 @@ class LibraryAnalyzer:
         with self._lock:
             running = self.is_running
             current = self.current_track
+            active_jobs = list(self._active_jobs.values())
             errors = self.errors_count
+            workers = self.max_workers if running else 0
 
         progress_pct = round((analyzed / total * 100.0), 1) if total > 0 else 100.0
 
@@ -251,6 +279,8 @@ class LibraryAnalyzer:
             "unanalyzed_tracks": unanalyzed,
             "progress_percent": progress_pct,
             "current_track": current,
+            "current_tracks": active_jobs,
+            "active_workers": workers,
             "errors_count": errors,
             "moods": {
                 "energy": energy_count,

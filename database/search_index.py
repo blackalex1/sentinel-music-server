@@ -11,7 +11,7 @@
 
 import re
 from typing import List, Set
-from sqlalchemy import or_, func, case
+from sqlalchemy import or_, and_, func, case
 from sqlalchemy.orm import Session
 from sqlalchemy.engine import Engine
 
@@ -41,6 +41,41 @@ LATIN_TO_CYRILLIC = {
     'o': 'о', 'p': 'п', 'q': 'к', 'r': 'р', 's': 'с', 't': 'т', 'u': 'у',
     'v': 'в', 'w': 'в', 'x': 'кс', 'y': 'и', 'z': 'з'
 }
+
+EN_TO_RU_LAYOUT = {
+    'q': 'й', 'w': 'ц', 'e': 'у', 'r': 'к', 't': 'е', 'y': 'н', 'u': 'г', 'i': 'ш', 'o': 'щ', 'p': 'з',
+    '[': 'х', '{': 'Х', ']': 'ъ', '}': 'Ъ', 'a': 'ф', 's': 'ы', 'd': 'в', 'f': 'а', 'g': 'п', 'h': 'р',
+    'j': 'о', 'k': 'л', 'l': 'д', ';': 'ж', ':': 'Ж', "'": 'э', '"': 'Э', 'z': 'я', 'x': 'ч', 'c': 'с',
+    'v': 'м', 'b': 'и', 'n': 'т', 'm': 'ь', ',': 'б', '<': 'Б', '.': 'ю', '>': 'Ю', '`': 'ё', '~': 'Ё',
+    '@': '"', '#': '№', '$': ';', '^': ':', '&': '?'
+}
+
+RU_TO_EN_LAYOUT = {
+    'й': 'q', 'ц': 'w', 'у': 'e', 'к': 'r', 'е': 't', 'н': 'y', 'г': 'u', 'ш': 'i', 'щ': 'o', 'з': 'p',
+    'х': '[', 'ъ': ']', 'ф': 'a', 'ы': 's', 'в': 'd', 'а': 'f', 'п': 'g', 'р': 'h', 'о': 'j', 'л': 'k',
+    'д': 'l', 'ж': ';', 'э': "'", 'я': 'z', 'ч': 'x', 'с': 'c', 'м': 'v', 'и': 'b', 'т': 'n', 'ь': 'm',
+    'б': ',', 'ю': '.', 'ё': '`'
+}
+
+
+def switch_keyboard_layout(text: str) -> str:
+    """
+    Инвертирует клавиатурную раскладку (QWERTY <-> ЙЦУКЕН).
+    Например: 'ghjlb' -> 'проди', 'rbyj' -> 'кино', 'цаукен' -> 'qwerty'.
+    """
+    res = []
+    for ch in text:
+        low = ch.lower()
+        is_upper = ch.isupper()
+        if low in EN_TO_RU_LAYOUT:
+            swapped = EN_TO_RU_LAYOUT[low]
+            res.append(swapped.upper() if is_upper else swapped)
+        elif low in RU_TO_EN_LAYOUT:
+            swapped = RU_TO_EN_LAYOUT[low]
+            res.append(swapped.upper() if is_upper else swapped)
+        else:
+            res.append(ch)
+    return "".join(res)
 
 
 def init_search_index(engine: Engine):
@@ -78,7 +113,8 @@ def init_search_index(engine: Engine):
 def extract_search_terms(query_str: str) -> Set[str]:
     """
     Генерирует набор поисковых терминов с нормализацией е/ё,
-    стеммингом русских окончаний и транслитерацией.
+    инверсией клавиатурной раскладки (QWERTY <-> ЙЦУКЕН),
+    стеммингом русских окончаний и двусторонней транслитерацией.
     """
     norm_q = query_str.strip().lower().replace("ё", "е")
     raw_tokens = re.findall(r"\w+", norm_q[:100], re.UNICODE)
@@ -89,7 +125,18 @@ def extract_search_terms(query_str: str) -> Set[str]:
     if len(raw_tokens) > 1:
         terms.add(norm_q)
 
-    for tok in raw_tokens:
+    # Инверсия клавиатурной раскладки (например: 'ghjlb' -> 'проди', 'rbyj' -> 'кино')
+    switched_q = switch_keyboard_layout(norm_q)
+    if switched_q != norm_q:
+        terms.add(switched_q)
+        switched_tokens = re.findall(r"\w+", switched_q[:100], re.UNICODE)
+        terms.update(switched_tokens)
+    else:
+        switched_tokens = []
+
+    all_tokens = set(raw_tokens) | set(switched_tokens)
+
+    for tok in all_tokens:
         # 1. Стемминг русских окончаний для падежей/множественного числа
         if len(tok) >= 4:
             for end in RUSSIAN_ENDINGS:
@@ -114,11 +161,13 @@ def extract_search_terms(query_str: str) -> Set[str]:
 
 def search_tracks(db: Session, query_str: str, limit: int = 50, offset: int = 0) -> List[Track]:
     """
-    Выполняет умный, быстрый поиск треков в PostgreSQL:
-    - pg_trgm (word_similarity) для поиска с учетом опечаток;
+    Выполняет умный, быстрый поиск треков в PostgreSQL/SQLite:
+    - инверсия ошибочной клавиатурной раскладки (QWERTY <-> ЙЦУКЕН);
+    - pg_trgm (word_similarity) для нечеткого поиска и опечаток;
     - нормализация е/ё и регистронезависимость;
     - стемминг русских окончаний;
     - транслитерация кириллица <-> латиница;
+    - мульти-полевой поиск (артист + название в одном запросе);
     - многоуровневое ранжирование релевантности.
     """
     if not query_str or not query_str.strip():
@@ -132,6 +181,9 @@ def search_tracks(db: Session, query_str: str, limit: int = 50, offset: int = 0)
         return []
 
     norm_q = query_str.strip().lower().replace("ё", "е")
+    switched_q = switch_keyboard_layout(norm_q)
+    raw_tokens = re.findall(r"\w+", norm_q[:100], re.UNICODE)
+    switched_tokens = re.findall(r"\w+", switched_q[:100], re.UNICODE) if switched_q != norm_q else []
 
     norm_title = func.replace(func.lower(Track.title), "ё", "е")
     norm_artist = func.replace(func.lower(Track.artist), "ё", "е")
@@ -147,12 +199,21 @@ def search_tracks(db: Session, query_str: str, limit: int = 50, offset: int = 0)
         pass
 
     conditions = []
+
+    # 1. Мульти-токенный поиск (когда запрос содержит и исполнителя, и песню, например "Queen Rhapsody")
+    if len(raw_tokens) > 1:
+        conditions.append(and_(*[combined_text.like(f"%{tok}%") for tok in raw_tokens]))
+    if len(switched_tokens) > 1:
+        conditions.append(and_(*[combined_text.like(f"%{tok}%") for tok in switched_tokens]))
+
+    # 2. Поиск по терминам, синонимам раскладки и транслитерации
     for term in search_terms:
         term_conds = [
             norm_artist.like(f"%{term}%"),
             norm_title.like(f"%{term}%"),
             norm_album.like(f"%{term}%"),
             norm_lyrics.like(f"%{term}%"),
+            combined_text.like(f"%{term}%"),
         ]
         if is_postgres:
             term_conds.append(func.word_similarity(term, combined_text) > 0.38)
@@ -166,7 +227,25 @@ def search_tracks(db: Session, query_str: str, limit: int = 50, offset: int = 0)
         case((norm_title.like(f"%{norm_q}%"), 40), else_=0),
         case((norm_album.like(f"%{norm_q}%"), 20), else_=0),
         case((norm_lyrics.like(f"%{norm_q}%"), 15), else_=0),
+        case((combined_text.like(f"%{norm_q}%"), 70), else_=0),
     ]
+
+    # Бонус за совпадение с инвертированной раскладкой
+    if switched_q != norm_q:
+        score_clauses.extend([
+            case((norm_artist.like(f"{switched_q}%"), 80), else_=0),
+            case((norm_artist.like(f"%{switched_q}%"), 50), else_=0),
+            case((norm_title.like(f"{switched_q}%"), 70), else_=0),
+            case((norm_title.like(f"%{switched_q}%"), 35), else_=0),
+            case((combined_text.like(f"%{switched_q}%"), 55), else_=0),
+        ])
+
+    # Бонус за мульти-токенное попадание артист + название
+    if len(raw_tokens) > 1:
+        score_clauses.append(case((and_(*[combined_text.like(f"%{tok}%") for tok in raw_tokens]), 120), else_=0))
+    if len(switched_tokens) > 1:
+        score_clauses.append(case((and_(*[combined_text.like(f"%{tok}%") for tok in switched_tokens]), 100), else_=0))
+
     if is_postgres:
         score_clauses.append(func.word_similarity(norm_q, combined_text) * 35)
 

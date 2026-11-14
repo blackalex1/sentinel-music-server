@@ -271,4 +271,52 @@ def test_plugin_manager_security_path_validation(tmp_path, monkeypatch):
     assert len(pm.plugins) == 0
 
 
+@pytest.mark.asyncio
+async def test_plugin_circuit_breaker_and_candidate_ranking():
+    """Проверяет работу Circuit Breaker при сбоях плагина и приоритизацию Lossless/320k."""
+    import asyncio
+    from plugin_system.base import BasePlugin
+    from plugin_system.manager import PluginManager, CircuitBreakerState
+
+    class FailingPlugin(BasePlugin):
+        name = "failing_provider"
+        version = "1.0.0"
+
+        async def search_candidates(self, artist: str, title: str, limit: int = 5):
+            raise ConnectionError("External service timeout")
+
+    class WorkingPlugin(BasePlugin):
+        name = "working_provider"
+        version = "1.0.0"
+
+        async def search_candidates(self, artist: str, title: str, limit: int = 5):
+            return [
+                {"id": "cand_128k", "title": title, "artist": artist, "audio_format": "mp3", "bitrate": 128},
+                {"id": "cand_flac", "title": title, "artist": artist, "audio_format": "flac", "bitrate": 1000},
+                {"id": "cand_320k", "title": title, "artist": artist, "audio_format": "mp3", "bitrate": 320},
+            ]
+
+    pm = PluginManager()
+    fail_p = FailingPlugin()
+    work_p = WorkingPlugin()
+    pm.plugins = [fail_p, work_p]
+
+    # Имитируем 3 запроса: FailingPlugin падает 3 раза
+    for _ in range(3):
+        await pm.search_all_candidates("Artist", "Song")
+
+    # Проверяем, что FailingPlugin перешел в состояние OPEN
+    assert pm.circuit_breaker.state[fail_p.name] == CircuitBreakerState.OPEN
+    assert pm.circuit_breaker.can_execute(fail_p.name) is False
+
+    # Следующий запрос сразу пропускает FailingPlugin без ожидания
+    res = await pm.search_all_candidates("Artist", "Song")
+    assert len(res) == 3
+
+    # Проверяем ранжирование по качеству: FLAC на 1 месте, 320k на 2 месте, 128k на 3 месте
+    assert res[0]["audio_format"] == "flac"
+    assert res[1]["bitrate"] == 320
+    assert res[2]["bitrate"] == 128
+
+
 

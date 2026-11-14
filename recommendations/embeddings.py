@@ -170,3 +170,18 @@ def deserialize_vector(json_str: Optional[str]) -> List[float]:
     except Exception:
         return []
 
+
+def cosine_similarity(v1: List[float], v2: List[float]) -> float:
+    """Вычисляет косинусное сходство между двумя векторами признаков."""
+    if not v1 or not v2 or len(v1) != len(v2):
+        return 0.0
+
+    dot = sum(a * b for a, b in zip(v1, v2))
+    norm_a = sum(a * a for a in v1) ** 0.5
+    norm_b = sum(b * b for b in v2) ** 0.5
+
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+
+    return dot / (norm_a * norm_b)
+

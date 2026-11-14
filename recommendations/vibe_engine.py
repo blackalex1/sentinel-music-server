@@ -1,10 +1,11 @@
 import math
 import random
+import datetime
 from typing import List, Optional, Union, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 
-from database.models import Track, UserReaction
+from database.models import Track, UserReaction, PlayHistory
 from .embeddings import deserialize_vector
 from .discovery import discovery_engine
 from .mood import apply_mood_filter
@@ -44,7 +45,9 @@ class VibeEngine:
         mood_energy: Optional[float] = None,  # Обратная совместимость
         discovery_ratio: float = 0.2,         # 0.0 - 1.0 (Частота новых треков)
         consecutive_artist: Optional[str] = None,
-        consecutive_count: int = 0
+        consecutive_count: int = 0,
+        skipped_artists: Optional[List[str]] = None,
+        tz_offset_minutes: int = 0
     ) -> Optional[Union[Track, Dict[str, Any]]]:
         """
         Выбирает следующий трек для потока на основе психоакустических признаков,
@@ -187,8 +190,8 @@ class VibeEngine:
                 .all()
             }
 
-        from database.models import PlayHistory
-        play_counts = {}
+        play_counts: Dict[int, int] = {}
+        skip_counts: Dict[int, int] = {}
         if candidate_ids:
             play_counts = dict(
                 self.db.query(PlayHistory.track_id, func.count(PlayHistory.id))
@@ -196,6 +199,19 @@ class VibeEngine:
                 .group_by(PlayHistory.track_id)
                 .all()
             )
+            skip_counts = dict(
+                self.db.query(PlayHistory.track_id, func.count(PlayHistory.id))
+                .filter(PlayHistory.track_id.in_(candidate_ids), PlayHistory.skipped == True)
+                .group_by(PlayHistory.track_id)
+                .all()
+            )
+
+        # Определение часа суток для Dayparting
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        local_now = now_utc + datetime.timedelta(minutes=tz_offset_minutes)
+        current_hour = local_now.hour
+
+        cooled_artists = set(skipped_artists or [])
 
         scored_candidates = []
         for cand in candidates:
@@ -216,18 +232,25 @@ class VibeEngine:
 
             # 3. Персонализация: Буст любимых треков и артистов
             if cand.id in liked_track_ids:
-                score += 2.2  # Сильный приоритет конкретным лайкнутым трекам
+                score += 3.5  # Максимальный приоритет конкретным лайкнутым трекам
             elif cand.artist in liked_artists:
-                score += 1.3  # Приоритет трекам любимого артиста
+                score += 1.0  # Умеренный приоритет другим трекам любимого артиста
 
             # 4. Персонализация: Буст за историю прослушиваний
             pc = play_counts.get(cand.id, 0)
             if pc > 0:
                 score += min(1.5, math.log1p(pc) * 0.5)
 
-            # 5. Точность попадания в целевое настроение
+            # 5. Skip Penalty: Штраф за частые пропуски трека
+            sk = skip_counts.get(cand.id, 0)
+            if sk > 0:
+                score -= min(2.5, sk * 1.4)
 
-            # 4. Точность попадания в целевое настроение
+            # Охлаждение артистов с повторными скипами
+            if cand.artist and cand.artist in cooled_artists:
+                score -= 1.8
+
+            # 6. Точность попадания в целевое настроение
             if active_mood == "energy" and cand.energy is not None:
                 score += cand.energy * 1.5
             elif active_mood == "chill" and cand.energy is not None:
@@ -236,10 +259,34 @@ class VibeEngine:
                 score += cand.valence * 1.5
             elif active_mood == "sad" and cand.valence is not None:
                 score += (1.0 - cand.valence) * 1.5
+            elif active_mood == "default":
+                # Dayparting: адаптация под биоритмы по времени суток
+                if 6 <= current_hour < 11:
+                    # Утро: позитив, подъем
+                    if cand.valence is not None and cand.valence >= 0.50:
+                        score += 0.8 * cand.valence
+                    if cand.energy is not None and 0.45 <= cand.energy <= 0.85:
+                        score += 0.6
+                elif 11 <= current_hour < 18:
+                    # День: концентрация, рабочий флоу
+                    if cand.energy is not None and 0.40 <= cand.energy <= 0.75:
+                        score += 0.6
+                elif 18 <= current_hour < 22:
+                    # Вечер: расслабленный вечерний вайб
+                    if cand.danceability is not None and cand.danceability >= 0.55:
+                        score += 0.6
+                else:
+                    # Ночь (22..05): calm, lofi, chill, мягкий звук
+                    if cand.energy is not None and cand.energy <= 0.50:
+                        score += 1.2
+                    elif cand.energy is not None and cand.energy > 0.75:
+                        score -= 1.2
+                    if cand.bpm is not None and cand.bpm <= 115.0:
+                        score += 0.5
 
-            # 5. Контролируемая энтропия (температура), чтобы избежать зацикливания
+            # 7. Контролируемая энтропия (температура), чтобы избежать зацикливания
             noise = random.uniform(0.85, 1.15)
-            final_score = max(0.1, score * noise)
+            final_score = max(0.05, score * noise)
             scored_candidates.append((final_score, cand))
 
         # Взвешенный вероятностный выбор среди топ-кандидатов с учетом персонализации

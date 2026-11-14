@@ -188,3 +188,30 @@ def test_input_validation_limits(client, auth_headers):
     # Отрицательный offset
     res_offset = client.get("/api/tracks/search?q=test&offset=-1", headers=auth_headers)
     assert res_offset.status_code == 422
+
+
+def test_search_keyboard_layout_switcher(client, auth_headers, sample_tracks):
+    """Проверяет поиск с ошибочной раскладкой клавиатуры (QWERTY <-> ЙЦУКЕН)."""
+    # 1. Английский запрос на русской раскладке: 'йгуут' -> 'queen'
+    res_ru_to_en = client.get("/api/tracks/search?q=йгуут", headers=auth_headers)
+    assert res_ru_to_en.status_code == 200
+    data = res_ru_to_en.json()
+    assert len(data) >= 1
+    assert data[0]["artist"] == "Queen"
+
+    # 2. Русский запрос на английской раскладке: 'rerkf' -> 'кукла'
+    res_en_to_ru = client.get("/api/tracks/search?q=rerkf", headers=auth_headers)
+    assert res_en_to_ru.status_code == 200
+    data2 = res_en_to_ru.json()
+    assert len(data2) >= 1
+    assert data2[0]["title"] == "Кукла Колдуна"
+
+
+def test_search_combined_artist_and_title(client, auth_headers, sample_tracks):
+    """Проверяет мульти-полевой поиск артист + название в одном запросе."""
+    res = client.get("/api/tracks/search?q=queen+bohemian", headers=auth_headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert len(data) == 1
+    assert data[0]["artist"] == "Queen"
+    assert data[0]["title"] == "Bohemian Rhapsody"

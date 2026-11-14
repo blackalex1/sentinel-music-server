@@ -1,14 +1,60 @@
 import os
 import sys
 import re
+import time
 import inspect
 import importlib.util
 import asyncio
+from collections import defaultdict
 from typing import List, Dict, Any, Optional, Tuple, Set
 
 from plugin_system.base import BasePlugin
 
 SAFE_PLUGIN_NAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+class CircuitBreakerState:
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+class PluginCircuitBreaker:
+    """
+    Предохранитель (Circuit Breaker) для изоляции медленных или сбоящих плагинов.
+    Предотвращает зависание сервера и задержки заполнения буфера при падении внешних источников.
+    """
+    def __init__(self, failure_threshold: int = 3, cooldown_seconds: float = 300.0):
+        self.failure_threshold = failure_threshold
+        self.cooldown_seconds = cooldown_seconds
+        self.failure_count: Dict[str, int] = defaultdict(int)
+        self.state: Dict[str, str] = defaultdict(lambda: CircuitBreakerState.CLOSED)
+        self.last_failure_time: Dict[str, float] = {}
+
+    def can_execute(self, plugin_name: str) -> bool:
+        curr_state = self.state[plugin_name]
+        if curr_state == CircuitBreakerState.CLOSED:
+            return True
+        if curr_state == CircuitBreakerState.OPEN:
+            now = time.time()
+            if now - self.last_failure_time.get(plugin_name, 0) >= self.cooldown_seconds:
+                self.state[plugin_name] = CircuitBreakerState.HALF_OPEN
+                return True
+            return False
+        if curr_state == CircuitBreakerState.HALF_OPEN:
+            return True
+        return True
+
+    def record_success(self, plugin_name: str):
+        self.failure_count[plugin_name] = 0
+        self.state[plugin_name] = CircuitBreakerState.CLOSED
+
+    def record_failure(self, plugin_name: str):
+        self.failure_count[plugin_name] += 1
+        self.last_failure_time[plugin_name] = time.time()
+        if self.failure_count[plugin_name] >= self.failure_threshold:
+            self.state[plugin_name] = CircuitBreakerState.OPEN
+            print(f"[CircuitBreaker] Плагин '{plugin_name}' превысил порог сбоев ({self.failure_threshold}) и переведен в состояние OPEN (кулдаун {self.cooldown_seconds}s).")
 
 
 def _is_safe_plugin_path(path: str, trusted_base_dir: str) -> bool:
@@ -38,6 +84,7 @@ class PluginManager:
             if env_val:
                 self.allowed_plugins = {p.strip() for p in env_val.split(",") if p.strip()}
         self.plugins: List[BasePlugin] = []
+        self.circuit_breaker = PluginCircuitBreaker()
 
     def load_plugins(self) -> int:
         """Сканирует папку plugins/ и загружает все найденные модули и пакеты."""
@@ -261,17 +308,24 @@ class PluginManager:
         effective_limit = limit if limit is not None else limit_per_source
 
         async def _query_plugin(p: BasePlugin) -> List[Dict[str, Any]]:
+            if not self.circuit_breaker.can_execute(p.name):
+                return []
+
             try:
                 # Ограничиваем время ожидания одного плагина до 7.5 сек (дает внешним источникам и P2P сетям время ответить)
                 res = await asyncio.wait_for(p.search_candidates(artist, title, limit=effective_limit), timeout=7.5)
                 if res and isinstance(res, list):
+                    self.circuit_breaker.record_success(p.name)
                     for r in res:
                         if "plugin_name" not in r:
                             r["plugin_name"] = p.name
                     return res
+                self.circuit_breaker.record_success(p.name)
             except asyncio.TimeoutError:
+                self.circuit_breaker.record_failure(p.name)
                 print(f"[PluginManager] Таймаут поиска (7.5s) в плагине {p.name}")
             except Exception as e:
+                self.circuit_breaker.record_failure(p.name)
                 print(f"[PluginManager] Ошибка в search_candidates плагина {p.name}: {e}")
             return []
 
@@ -290,6 +344,33 @@ class PluginManager:
                         seen_ids.add(cid)
                     all_candidates.append(item)
 
+        # Ранжирование кандидатов по качеству звука: Lossless/FLAC -> 320k -> 256k -> 128k
+        def _score_candidate_quality(candidate: Dict[str, Any]) -> int:
+            score = 0
+            fmt = str(candidate.get("format") or candidate.get("audio_format") or candidate.get("extension") or "").lower()
+            bitrate_val = candidate.get("bitrate") or 0
+            if isinstance(bitrate_val, str):
+                try:
+                    bitrate_val = int(re.sub(r"[^\d]", "", bitrate_val))
+                except Exception:
+                    bitrate_val = 0
+
+            if "flac" in fmt or "lossless" in fmt or "wav" in fmt:
+                score += 1000
+            elif bitrate_val >= 320:
+                score += 800
+            elif bitrate_val >= 256:
+                score += 500
+            elif bitrate_val >= 192:
+                score += 300
+            elif bitrate_val >= 128:
+                score += 150
+            else:
+                score += 50
+
+            return score
+
+        all_candidates.sort(key=_score_candidate_quality, reverse=True)
         return all_candidates
 
     async def download_selected_candidate(

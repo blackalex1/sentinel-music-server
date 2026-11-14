@@ -71,6 +71,7 @@ class RemoteConnectionManager:
         # user_id -> dict[device_id, ConnectedDevice]
         self._connections: Dict[int, Dict[str, ConnectedDevice]] = defaultdict(dict)
         self._last_playback_session: Dict[int, Dict[str, Any]] = {}
+        self._party_sessions: Dict[int, Dict[str, Any]] = {}
         self._lock = asyncio.Lock()
 
     async def connect(self, device: ConnectedDevice):
@@ -122,6 +123,110 @@ class RemoteConnectionManager:
 
         # Оповещаем оставшиеся устройства
         await self.broadcast_devices(user_id)
+        # Выход из активной сессии совместного воспроизведения Party Mode
+        await self.leave_party(user_id, device_id)
+
+    def get_party_info(self, user_id: int) -> Optional[Dict[str, Any]]:
+        party = self._party_sessions.get(user_id)
+        if not party:
+            return None
+        now = time.time()
+        elapsed_ms = int((now - party["anchor_server_time"]) * 1000) if party["is_playing"] else 0
+        computed_pos_ms = party["anchor_position_ms"] + elapsed_ms
+        if party.get("track") and party["track"].get("duration"):
+            try:
+                dur_ms = int(float(party["track"]["duration"]) * 1000)
+                if dur_ms > 0:
+                    computed_pos_ms = min(computed_pos_ms, dur_ms)
+            except Exception:
+                pass
+
+        user_devs = self._connections.get(user_id, {})
+        members_list = [
+            {
+                "device_id": did,
+                "name": user_devs[did].name if did in user_devs else did,
+                "is_host": did == party["host_device_id"]
+            }
+            for did in party["members"]
+        ]
+        return {
+            "party_id": party["party_id"],
+            "name": party["name"],
+            "host_device_id": party["host_device_id"],
+            "is_playing": party["is_playing"],
+            "current_track": party["track"],
+            "anchor_position_ms": party["anchor_position_ms"],
+            "anchor_server_time": party["anchor_server_time"],
+            "computed_position_ms": computed_pos_ms,
+            "members": members_list
+        }
+
+    async def create_party(self, user_id: int, host_device_id: str, name: Optional[str] = None) -> Dict[str, Any]:
+        user_devs = self._connections.get(user_id, {})
+        host = user_devs.get(host_device_id)
+        cur_track = host.state.get("current_track") if host else None
+        is_playing = bool(host.state.get("is_playing", False)) if host else False
+        pos_ms = int(host.state.get("position_ms", 0)) if host else 0
+
+        party_id = f"party_{user_id}_{int(time.time())}"
+        party = {
+            "party_id": party_id,
+            "name": name or f"Party ({host.name if host else 'Master'})",
+            "host_device_id": host_device_id,
+            "user_id": user_id,
+            "members": {host_device_id},
+            "track": cur_track,
+            "is_playing": is_playing,
+            "anchor_position_ms": pos_ms,
+            "anchor_server_time": time.time(),
+            "created_at": time.time()
+        }
+        self._party_sessions[user_id] = party
+        info = self.get_party_info(user_id)
+        await self._broadcast_party_update(user_id, exclude_device_id=host_device_id)
+        return info
+
+    async def join_party(self, user_id: int, device_id: str) -> Optional[Dict[str, Any]]:
+        party = self._party_sessions.get(user_id)
+        if not party:
+            return None
+        party["members"].add(device_id)
+        info = self.get_party_info(user_id)
+        await self._broadcast_party_update(user_id, exclude_device_id=device_id)
+        return info
+
+    async def leave_party(self, user_id: int, device_id: str) -> bool:
+        party = self._party_sessions.get(user_id)
+        if not party or device_id not in party["members"]:
+            return False
+        party["members"].remove(device_id)
+        if not party["members"] or device_id == party["host_device_id"]:
+            del self._party_sessions[user_id]
+            await self._broadcast_to_user(user_id, {"type": "party_closed"})
+            return True
+        await self._broadcast_party_update(user_id, exclude_device_id=device_id)
+        return True
+
+    async def _broadcast_party_update(self, user_id: int, exclude_device_id: Optional[str] = None):
+        info = self.get_party_info(user_id)
+        if info:
+            msg = {"type": "party_update", "party": info}
+            await self._broadcast_to_user(user_id, msg, exclude_device_id=exclude_device_id)
+
+    async def broadcast_party_sync(self, user_id: int):
+        info = self.get_party_info(user_id)
+        if info:
+            msg = {"type": "party_sync", "party": info}
+            party = self._party_sessions.get(user_id)
+            if party:
+                user_devs = self._connections.get(user_id, {})
+                tasks = [
+                    self._send_json_safe(user_devs[did].websocket, msg)
+                    for did in party["members"] if did in user_devs
+                ]
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
 
     def get_last_playback_session(self, user_id: int) -> Optional[Dict[str, Any]]:
         return self._last_playback_session.get(user_id)
@@ -237,6 +342,18 @@ class RemoteConnectionManager:
                 "saved_at": time.time()
             }
 
+        # Синхронизация Party Mode, если данное устройство является хостом группы
+        party = self._party_sessions.get(user_id)
+        if party and party["host_device_id"] == device_id:
+            if "current_track" in new_state:
+                party["track"] = new_state["current_track"]
+            if "is_playing" in new_state:
+                party["is_playing"] = bool(new_state["is_playing"])
+            if "position_ms" in new_state:
+                party["anchor_position_ms"] = int(new_state["position_ms"])
+            party["anchor_server_time"] = time.time()
+            await self.broadcast_party_sync(user_id)
+
         msg = {
             "type": "device_state",
             "device_id": device_id,
@@ -262,6 +379,21 @@ class RemoteConnectionManager:
                 await self.sync_track_reaction(user_id, t_id, is_l, is_d)
             except Exception:
                 pass
+
+        # Обновление состояния группы Party Mode при командах управления
+        party = self._party_sessions.get(user_id)
+        if party and (from_device_id == party["host_device_id"] or target_device_id == party["host_device_id"]):
+            party["anchor_server_time"] = time.time()
+            if payload and "position_ms" in payload:
+                try:
+                    party["anchor_position_ms"] = int(payload["position_ms"])
+                except Exception:
+                    pass
+            if cmd_upper == "PAUSE":
+                party["is_playing"] = False
+            elif cmd_upper in ("PLAY", "PLAY_TRACK"):
+                party["is_playing"] = True
+            await self.broadcast_party_sync(user_id)
 
         user_devs = self._connections.get(user_id, {})
         target = user_devs.get(target_device_id)
@@ -308,7 +440,42 @@ class RemoteCommandRequest(BaseModel):
     payload: Optional[Dict[str, Any]] = None
 
 
+class PartyActionRequest(BaseModel):
+    device_id: str
+    name: Optional[str] = None
+
+
 # --- REST Эндпоинты ---
+
+@router.get("/party")
+async def get_party_status(current_user: User = Depends(get_current_user)):
+    """Возвращает статус текущей сессии совместного синхронного воспроизведения (Party Mode)."""
+    info = remote_manager.get_party_info(current_user.id)
+    return {"active": bool(info), "party": info}
+
+
+@router.post("/party/create")
+async def create_party_endpoint(payload: PartyActionRequest, current_user: User = Depends(get_current_user)):
+    """Создает сессию Party Mode, назначая вызывающее устройство хостом."""
+    party = await remote_manager.create_party(current_user.id, payload.device_id, payload.name)
+    return {"status": "created", "party": party}
+
+
+@router.post("/party/join")
+async def join_party_endpoint(payload: PartyActionRequest, current_user: User = Depends(get_current_user)):
+    """Подключает устройство к активной сессии совместного воспроизведения."""
+    party = await remote_manager.join_party(current_user.id, payload.device_id)
+    if not party:
+        raise HTTPException(status_code=404, detail="Активная сессия Party Mode не найдена")
+    return {"status": "joined", "party": party}
+
+
+@router.post("/party/leave")
+async def leave_party_endpoint(payload: PartyActionRequest, current_user: User = Depends(get_current_user)):
+    """Отключает устройство от сессии совместного воспроизведения."""
+    left = await remote_manager.leave_party(current_user.id, payload.device_id)
+    return {"status": "left" if left else "not_in_party"}
+
 
 @router.get("/status")
 async def get_remote_status(
@@ -578,6 +745,26 @@ async def remote_websocket_endpoint(
                     "type": "devices_update",
                     "devices": remote_manager.get_user_devices(user_id)
                 })
+
+            elif action == "party_create":
+                name = data.get("name")
+                p = await remote_manager.create_party(user_id, device.device_id, name)
+                await websocket.send_json({"type": "party_created", "party": p})
+
+            elif action == "party_join":
+                p = await remote_manager.join_party(user_id, device.device_id)
+                if p:
+                    await websocket.send_json({"type": "party_joined", "party": p})
+                else:
+                    await websocket.send_json({"type": "error", "message": "Сессия Party Mode не найдена"})
+
+            elif action == "party_leave":
+                await remote_manager.leave_party(user_id, device.device_id)
+                await websocket.send_json({"type": "party_left"})
+
+            elif action == "party_info":
+                p = remote_manager.get_party_info(user_id)
+                await websocket.send_json({"type": "party_info", "party": p})
 
     except WebSocketDisconnect:
         await remote_manager.disconnect(user_id, device.device_id, websocket)
