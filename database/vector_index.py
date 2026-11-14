@@ -91,7 +91,9 @@ def find_nearest_tracks(
 
     # 1. Аппаратный поиск через pgvector (PostgreSQL)
     if is_pgvector_active(db):
+        sp = None
         try:
+            sp = db.begin_nested()
             vec_str = "[" + ",".join(str(round(x, 4)) for x in target_vector) + "]"
             raw_sql = """
                 SELECT id FROM tracks
@@ -99,14 +101,15 @@ def find_nearest_tracks(
                   AND embedding_vec IS NOT NULL
             """
             params = {"vec": vec_str, "lim": max(10, limit * 2)}
-            if exclude_set:
-                raw_sql += " AND id NOT IN :ex_ids"
-                params["ex_ids"] = tuple(exclude_set)
+            safe_ints = [int(x) for x in exclude_set if isinstance(x, (int, str)) and str(x).lstrip('-').isdigit()]
+            if safe_ints:
+                raw_sql += f" AND id NOT IN ({','.join(str(i) for i in safe_ints)})"
 
-            raw_sql += " ORDER BY embedding_vec <=> :vec::vector LIMIT :lim"
+            raw_sql += " ORDER BY embedding_vec <=> CAST(:vec AS vector) LIMIT :lim"
 
             rows = db.execute(text(raw_sql), params).fetchall()
             found_ids = [r[0] for r in rows]
+            sp.commit()
             if found_ids:
                 q = db.query(Track).filter(Track.id.in_(found_ids))
                 if mood and mood not in ("default", "all"):
@@ -118,8 +121,11 @@ def find_nearest_tracks(
                 if ordered:
                     return ordered[:limit]
         except Exception:
-            # При любой ошибке в raw SQL бесшовно переходим на программный фоллбэк
-            pass
+            if sp:
+                try:
+                    sp.rollback()
+                except Exception:
+                    pass
 
     # 2. Программный фоллбэк (SQLite / fallback)
     query = (

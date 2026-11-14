@@ -159,18 +159,25 @@ class VibeEngine:
         )
 
         # 5. Двухэтапная генерация кандидатов (Nearest Neighbors HNSW + Serendipity Random)
+        disliked_ids = {
+            r[0] for r in self.db.query(UserReaction.track_id).filter(UserReaction.is_disliked == True).all()
+        }
+        all_excluded = recent_ids | disliked_ids
+        if current_track_id:
+            all_excluded.add(current_track_id)
+
         nearest_candidates = find_nearest_tracks(
             self.db,
             target_vector=target_direction_vec,
             limit=50,
             mood=active_mood,
-            exclude_ids=recent_ids
+            exclude_ids=all_excluded
         )
         random_candidates = mood_filtered_query.order_by(func.random()).limit(50).all()
 
-        candidate_map = {c.id: c for c in nearest_candidates}
+        candidate_map = {c.id: c for c in nearest_candidates if c.id not in disliked_ids}
         for r_cand in random_candidates:
-            if r_cand.id not in candidate_map:
+            if r_cand.id not in candidate_map and r_cand.id not in disliked_ids:
                 candidate_map[r_cand.id] = r_cand
         candidates = list(candidate_map.values())
 
